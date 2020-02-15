@@ -1,7 +1,23 @@
 {
   "tasks": [
     {
-      "label": "build c++",
+      "label": "build c fast",
+      "type": "shell",
+      "command": "g++",
+      "args": [
+        "-O3",
+        "-g",
+        "${file}",
+        "-o",
+        "${fileDirname}\\${fileBasenameNoExtension}-fast.exe"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    },
+    {
+      "label": "build c default",
       "type": "shell",
       "command": "g++",
       "args": [
@@ -9,11 +25,7 @@
         "${file}",
         "-o",
         "${fileDirname}\\${fileBasenameNoExtension}.exe"
-      ],
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      }
+      ]
     }
   ],
   "version": "2.0.0"

@@ -1,14 +1,15 @@
 #include "stdio.h"
 #include "time.h"
 
-#define DEBUG 1
+#define LOG_LEVEL 1
 
 #define SIZE 81
 #define ABS(a, b) ((a) > (b) ? (a) - (b) : (b) - (a))
 
 const unsigned short ALL_BITS = (1 << 9) - 1;
 
-unsigned char bitToNum[ALL_BITS + 1];
+unsigned char bit2num[ALL_BITS + 1];
+unsigned short num2bit['9' + 1];
 
 unsigned char updateCells[SIZE][20]; // row: 8, col: 8, square remain: 4
 unsigned char puzzle[SIZE];
@@ -16,11 +17,13 @@ unsigned char solution[SIZE];
 unsigned short possibilities[SIZE];
 unsigned char missing = 0;
 
-#ifdef DEBUG
+#ifdef LOG_LEVEL
+int setNumIterations = 0;
 double timeSetup = 0;
 double timeReadInput = 0;
-double timeSetNumber = 0;
 double timeSolve = 0;
+double timeCheckSolution = 0;
+double timeSetNumber = 0;
 double timeGuess = 0;
 #endif
 
@@ -30,25 +33,21 @@ inline unsigned short removeBit(unsigned short val)
 }
 inline unsigned char isTwoBits(unsigned short val)
 {
-  return val && bitToNum[removeBit(val)];
-}
-inline unsigned short numToBit(unsigned char num)
-{
-  return 1 << (num - 1);
+  return val && bit2num[removeBit(val)];
 }
 
 void setup()
 {
-#ifdef DEBUG
+#ifdef LOG_LEVEL
   clock_t start = clock();
 #endif
 
-  bitToNum[0] = 0;
+  bit2num[0] = 0;
   for (unsigned short i = 1; i <= ALL_BITS; ++i)
   {
     if (removeBit(i))
     {
-      bitToNum[i] = 0;
+      bit2num[i] = 0;
     }
     else
     { // single bit number
@@ -58,9 +57,14 @@ void setup()
       {
         num++;
       }
-      bitToNum[i] = num + '0';
+      bit2num[i] = num + '0';
     }
   }
+  for (unsigned char i = 0; i < '0'; i++)
+    num2bit[i] = 0;
+  num2bit['0'] = ALL_BITS; // not correct but results in faster setup before solve
+  for (unsigned char i = '1'; i <= '9'; i++)
+    num2bit[i] = 1 << (i - '1');
 
   unsigned char rows[9][9];
   unsigned char cols[9][9];
@@ -106,16 +110,11 @@ void setup()
     }
   }
 
-#ifdef DEBUG
+#ifdef LOG_LEVEL
   timeSetup += ((double)(clock() - start) / CLOCKS_PER_SEC);
 #endif
 }
 
-inline unsigned char setNumber(unsigned char num)
-{
-}
-
-void runAlgoFromGuess();
 void runAlgo();
 
 void guess()
@@ -168,74 +167,81 @@ void guess()
 void runAlgo()
 {
   unsigned char progress = 1;
-  while (progress == 1 && missing)
+  while (progress && missing)
   {
     progress = 0;
     for (unsigned char i = 0; i < SIZE; ++i)
     {
-      if (bitToNum[possibilities[i]])
+      unsigned short bit = possibilities[i];
+      if (bit2num[bit])
       {
-#ifdef DEBUG
+#ifdef LOG_LEVEL
+#if LOG_LEVEL > 1
         clock_t start = clock();
 #endif
+#endif
 
-        puzzle[i] = bitToNum[possibilities[i]];
+        puzzle[i] = bit2num[bit];
+        unsigned short invBit = ~bit;
+        unsigned char *cells2update = updateCells[i];
 
         for (unsigned char j = 0; j < 20; ++j)
-        {
-          possibilities[updateCells[i][j]] &= ~possibilities[i];
-        }
+          possibilities[cells2update[j]] &= invBit;
 
         possibilities[i] = 0;
         missing--;
 
-#ifdef DEBUG
+#ifdef LOG_LEVEL
+#if LOG_LEVEL > 1
         timeSetNumber += ((double)(clock() - start) / CLOCKS_PER_SEC);
+#endif
 #endif
         progress = 1;
       }
     }
   }
 
-  if (missing && !progress)
+  if (missing)
   {
-#ifdef DEBUG
+#ifdef LOG_LEVEL
+#if LOG_LEVEL > 1
     clock_t start = clock();
+#endif
 #endif
 
     guess();
 
-#ifdef DEBUG
+#ifdef LOG_LEVEL
+#if LOG_LEVEL > 1
     timeGuess += ((double)(clock() - start) / CLOCKS_PER_SEC);
+#endif
 #endif
   }
 }
 
 void solve()
 {
-#ifdef DEBUG
+#ifdef LOG_LEVEL
   clock_t start = clock();
 #endif
 
   for (unsigned char i = 0; i < SIZE; ++i)
-    possibilities[i] = puzzle[i] == '0' ? ALL_BITS : numToBit(puzzle[i] - '0');
+    possibilities[i] = num2bit[puzzle[i]];
 
   missing = SIZE;
 
   runAlgo();
 
-#ifdef DEBUG
+#ifdef LOG_LEVEL
   timeSolve += ((double)(clock() - start) / CLOCKS_PER_SEC);
 #endif
 }
 
-unsigned char checkSolution()
+void checkSolution()
 {
   for (unsigned char i = 0; i < SIZE; ++i)
-    if (puzzle[i] != solution[i])
-      return 0;
-
-  return 1;
+    if (__builtin_expect(puzzle[i] != solution[i], 0))
+      printf("FAAAIIIL");
 }
 
 int main()
@@ -249,37 +255,44 @@ int main()
   unsigned char header[50];
   fscanf(fp, "%[^\n]", header);
 
-  unsigned int failed = 0;
-
   for (unsigned int i = 0; i < 1000000; ++i)
   {
-#ifdef DEBUG
-    clock_t sInput = clock();
+#ifdef LOG_LEVEL
+    clock_t startReadInput = clock();
 #endif
 
     fscanf(fp, "\n%[^,],%s", puzzle, solution);
 
-#ifdef DEBUG
-    timeReadInput += ((double)(clock() - sInput) / CLOCKS_PER_SEC);
+#ifdef LOG_LEVEL
+    timeReadInput += ((double)(clock() - startReadInput) / CLOCKS_PER_SEC);
 #endif
 
     solve();
 
-    if (!checkSolution())
-      failed++;
+#ifdef LOG_LEVEL
+    clock_t startCheckSolution = clock();
+#endif
+    checkSolution();
+
+#ifdef LOG_LEVEL
+    timeCheckSolution += ((double)(clock() - startCheckSolution) / CLOCKS_PER_SEC);
+#endif
   }
 
   clock_t end = clock();
 
-  printf("failed: %d\n", failed);
-  printf("took: %.3f\n", ((double)(end - start) / CLOCKS_PER_SEC));
+  printf("took: %.3fs\n", ((double)(end - start) / CLOCKS_PER_SEC));
 
-#ifdef DEBUG
-  printf("time setup: %.3f\n", timeSetup);
-  printf("time read input: %.3f\n", timeReadInput);
-  printf("time solve: %.3f\n", timeSolve);
-  printf("time update cells: %.3f\n", timeSetNumber);
-  printf("time guess: %.3f\n", timeGuess);
+#ifdef LOG_LEVEL
+  printf("time setup: %.3fs\n", timeSetup);
+  printf("time read input: %.3fs\n", timeReadInput);
+  printf("time solve: %.3fs\n", timeSolve);
+  printf("time check solution: %.3fs\n", timeCheckSolution);
+
+#if LOG_LEVEL > 1
+  printf("time update cells: %.3fs\n", timeSetNumber);
+  printf("time guess: %.3fs\n", timeGuess);
+#endif
 #endif
 
   fclose(fp);
