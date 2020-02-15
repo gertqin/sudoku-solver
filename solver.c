@@ -18,7 +18,6 @@ unsigned short possibilities[SIZE];
 unsigned char missing = 0;
 
 #ifdef LOG_LEVEL
-int setNumIterations = 0;
 double timeSetup = 0;
 double timeReadInput = 0;
 double timeSolve = 0;
@@ -237,13 +236,6 @@ void solve()
 #endif
 }
 
-void checkSolution()
-{
-  for (unsigned char i = 0; i < SIZE; ++i)
-    if (__builtin_expect(puzzle[i] != solution[i], 0))
-      printf("FAAAIIIL");
-}
-
 int main()
 {
   clock_t start = clock();
@@ -272,7 +264,9 @@ int main()
 #ifdef LOG_LEVEL
     clock_t startCheckSolution = clock();
 #endif
-    checkSolution();
+    for (unsigned char i = 0; i < SIZE; ++i)
+      if (__builtin_expect(puzzle[i] != solution[i], 0))
+        printf("FAAAIIIL");
 
 #ifdef LOG_LEVEL
     timeCheckSolution += ((double)(clock() - startCheckSolution) / CLOCKS_PER_SEC);
