@@ -1,9 +1,5 @@
-#include <iostream>
-#include <fstream>
 #include "stdio.h"
 #include "time.h"
-
-using namespace std;
 
 #define DEBUG 1
 
@@ -274,15 +270,16 @@ int main()
   }
 
   clock_t end = clock();
-  cout << "failed: " << failed << endl;
-  cout << "took: " << ((double)(end - start) / CLOCKS_PER_SEC) << "s" << endl;
+
+  printf("failed: %d\n", failed);
+  printf("took: %.3f\n", ((double)(end - start) / CLOCKS_PER_SEC));
 
 #ifdef DEBUG
-  cout << "time setup: " << timeSetup << endl;
-  cout << "time read input: " << timeReadInput << endl;
-  cout << "time solve: " << timeSolve << endl;
-  cout << "time update number: " << timeSetNumber << endl;
-  cout << "time guess: " << timeGuess << endl;
+  printf("time setup: %.3f\n", timeSetup);
+  printf("time read input: %.3f\n", timeReadInput);
+  printf("time solve: %.3f\n", timeSolve);
+  printf("time update cells: %.3f\n", timeSetNumber);
+  printf("time guess: %.3f\n", timeGuess);
 #endif
 
   fclose(fp);

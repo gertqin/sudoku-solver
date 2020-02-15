@@ -4,7 +4,12 @@
       "label": "build c++",
       "type": "shell",
       "command": "g++",
-      "args": ["-g", "${file}", "-o", "${fileDirname}\\${fileBasenameNoExtension}.exe"],
+      "args": [
+        "-g",
+        "${file}",
+        "-o",
+        "${fileDirname}\\${fileBasenameNoExtension}.exe"
+      ],
       "group": {
         "kind": "build",
         "isDefault": true
