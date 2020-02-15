@@ -6,6 +6,5 @@
     "iostream": "cpp",
     "iosfwd": "cpp",
     "limits": "cpp"
-  },
-  "vim.disableExtension": true
+  }
 }
