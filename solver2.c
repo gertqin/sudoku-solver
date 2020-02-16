@@ -1,7 +1,7 @@
 #include "stdio.h"
 #include "time.h"
 
-#define LOG_LEVEL 1
+// #define LOG_LEVEL 1
 
 #define SIZE 81
 #define ABS(a, b) ((a) > (b) ? (a) - (b) : (b) - (a))
@@ -17,6 +17,7 @@ unsigned char cell2square[SIZE];
 
 unsigned char puzzle[SIZE];
 unsigned char solution[SIZE];
+
 unsigned short rowRemain[9];
 unsigned short colRemain[9];
 unsigned short squareRemain[9];
@@ -107,6 +108,69 @@ inline void setNumber(unsigned char cell, unsigned short bit)
 #endif
 }
 
+void runAlgo();
+void guess()
+{
+  unsigned char guessCell = SIZE;
+  unsigned short guessBit = 0;
+  for (unsigned char i = 0; i < SIZE; ++i)
+  {
+    if (puzzle[i] == '0')
+    {
+      unsigned short bit = rowRemain[cell2row[i]] & colRemain[cell2col[i]] & squareRemain[cell2square[i]];
+      if (!bit)
+        return;
+      else if (isTwoBits(bit) && !guessBit)
+      {
+        guessCell = i;
+        guessBit = bit;
+      }
+    }
+  }
+  if (guessCell == SIZE)
+    return;
+
+  unsigned short rowCopy[9];
+  unsigned short colCopy[9];
+  unsigned short squareCopy[9];
+  unsigned char puzzleCopy[SIZE];
+  unsigned char missingCopy = missing;
+
+  for (unsigned char i = 0; i < 9; ++i)
+  {
+    rowCopy[i] = rowRemain[i];
+    colCopy[i] = colRemain[i];
+    squareCopy[i] = squareRemain[i];
+  }
+  for (unsigned char i = 0; i < SIZE; ++i)
+    puzzleCopy[i] = puzzle[i];
+
+  unsigned short bit1 = 1;
+  while (!(bit1 & guessBit))
+    bit1 <<= 1;
+
+  unsigned short bit2 = removeBit(guessBit);
+
+  setNumber(guessCell, bit1);
+  runAlgo();
+
+  if (missing > 0)
+  {
+    missing = missingCopy;
+    for (unsigned char i = 0; i < 9; ++i)
+    {
+      rowRemain[i] = rowCopy[i];
+      colRemain[i] = colCopy[i];
+      squareRemain[i] = squareCopy[i];
+    }
+    for (unsigned char i = 0; i < SIZE; ++i)
+      puzzle[i] = puzzleCopy[i];
+
+    setNumber(guessCell, bit2);
+    runAlgo();
+  }
+}
+
 void runAlgo()
 {
   unsigned char progress = 1;
@@ -135,7 +199,7 @@ void runAlgo()
 #endif
 #endif
 
-    // guess();
+    guess();
 
 #ifdef LOG_LEVEL
 #if LOG_LEVEL > 1
@@ -158,11 +222,11 @@ void solve()
     squareRemain[i] = ALL_BITS;
   }
 
+  missing = SIZE;
+
   for (unsigned char i = 0; i < SIZE; ++i)
     if (puzzle[i] != '0')
       setNumber(i, num2bit[puzzle[i]]);
-
-  missing = SIZE;
 
   runAlgo();
 
@@ -182,8 +246,6 @@ int main()
   unsigned char header[50];
   fscanf(fp, "%[^\n]", header);
 
-  int failed = 0;
-
   for (unsigned int i = 0; i < 1000000; ++i)
   {
 #ifdef LOG_LEVEL
@@ -201,9 +263,12 @@ int main()
 #ifdef LOG_LEVEL
     clock_t startCheckSolution = clock();
 #endif
-    for (unsigned char i = 0; i < SIZE; ++i)
-      if (__builtin_expect(puzzle[i] != solution[i], 0))
-        failed++; // printf("FAAAIIIL");
+    for (unsigned char j = 0; j < SIZE; ++j)
+      if (__builtin_expect(puzzle[j] != solution[j], 0))
+      {
+        printf("%d: FAIL\n", i);
+        return -1;
+      }
 
 #ifdef LOG_LEVEL
     timeCheckSolution += ((double)(clock() - startCheckSolution) / CLOCKS_PER_SEC);
@@ -212,7 +277,6 @@ int main()
 
   clock_t end = clock();
 
-  printf("failed: %d\n", failed);
   printf("took: %.3fs\n", ((double)(end - start) / CLOCKS_PER_SEC));
 
 #ifdef LOG_LEVEL

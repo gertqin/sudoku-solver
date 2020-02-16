@@ -119,7 +119,7 @@ void runAlgo();
 void guess()
 {
   for (unsigned char i = 0; i < SIZE; ++i)
-    if (!possibilities[i] && !puzzle[i])
+    if (!possibilities[i] && puzzle[i] == '0')
       return;
 
   unsigned short possibClone[SIZE];
