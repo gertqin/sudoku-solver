@@ -1,7 +1,7 @@
 #include "stdio.h"
 #include "time.h"
 
-// #define LOG_LEVEL 1
+#define LOG_LEVEL 1
 
 #define SIZE 81
 #define ABS(a, b) ((a) > (b) ? (a) - (b) : (b) - (a))
@@ -15,8 +15,8 @@ unsigned char cell2row[SIZE];
 unsigned char cell2col[SIZE];
 unsigned char cell2square[SIZE];
 
-unsigned char puzzle[SIZE];
-unsigned char solution[SIZE];
+unsigned char puzzle[SIZE + 1];
+unsigned char solution[SIZE + 1];
 
 unsigned short rowRemain[9];
 unsigned short colRemain[9];
@@ -29,8 +29,6 @@ double timeSetup = 0;
 double timeReadInput = 0;
 double timeSolve = 0;
 double timeCheckSolution = 0;
-double timeSetNumber = 0;
-double timeGuess = 0;
 #endif
 
 inline unsigned short removeBit(unsigned short val)
@@ -87,11 +85,6 @@ void setup()
 
 inline void setNumber(unsigned char cell, unsigned short bit)
 {
-#ifdef LOG_LEVEL
-#if LOG_LEVEL > 1
-  clock_t start = clock();
-#endif
-#endif
   puzzle[cell] = bit2num[bit];
 
   unsigned short invBit = ~bit;
@@ -100,12 +93,6 @@ inline void setNumber(unsigned char cell, unsigned short bit)
   squareRemain[cell2square[cell]] &= invBit;
 
   missing--;
-
-#ifdef LOG_LEVEL
-#if LOG_LEVEL > 1
-  timeSetNumber += ((double)(clock() - start) / CLOCKS_PER_SEC);
-#endif
-#endif
 }
 
 void runAlgo();
@@ -193,19 +180,7 @@ void runAlgo()
 
   if (missing)
   {
-#ifdef LOG_LEVEL
-#if LOG_LEVEL > 1
-    clock_t start = clock();
-#endif
-#endif
-
     guess();
-
-#ifdef LOG_LEVEL
-#if LOG_LEVEL > 1
-    timeGuess += ((double)(clock() - start) / CLOCKS_PER_SEC);
-#endif
-#endif
   }
 }
 
@@ -244,7 +219,8 @@ int main()
   FILE *fp = fopen("sudoku.csv", "r");
 
   unsigned char header[50];
-  fscanf(fp, "%[^\n]", header);
+  // "quizzes,solutions\n" = 18
+  fread(header, sizeof(char), 18, fp);
 
   for (unsigned int i = 0; i < 1000000; ++i)
   {
@@ -252,7 +228,8 @@ int main()
     clock_t startReadInput = clock();
 #endif
 
-    fscanf(fp, "\n%[^,],%s", puzzle, solution);
+    fread(puzzle, sizeof(char), 82, fp);
+    fread(solution, sizeof(char), 82, fp);
 
 #ifdef LOG_LEVEL
     timeReadInput += ((double)(clock() - startReadInput) / CLOCKS_PER_SEC);
@@ -284,11 +261,6 @@ int main()
   printf("time read input: %.3fs\n", timeReadInput);
   printf("time solve: %.3fs\n", timeSolve);
   printf("time check solution: %.3fs\n", timeCheckSolution);
-
-#if LOG_LEVEL > 1
-  printf("time update cells: %.3fs\n", timeSetNumber);
-  printf("time guess: %.3fs\n", timeGuess);
-#endif
 #endif
 
   fclose(fp);

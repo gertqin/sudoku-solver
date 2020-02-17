@@ -9,7 +9,7 @@
         "-g",
         "${file}",
         "-o",
-        "${fileDirname}\\${fileBasenameNoExtension}-fast.exe"
+        "${fileDirname}\\${fileBasenameNoExtension}.exe"
       ],
       "group": {
         "kind": "build",
