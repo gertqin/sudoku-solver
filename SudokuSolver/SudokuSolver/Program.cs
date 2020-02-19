@@ -9,7 +9,7 @@ namespace SudokuSolver
 
     const char SIZE = (char)81;
     const ulong ALL_BITS = (1 << 9) - 1;
-    const ulong ALL_BITS_PARALLEL = ((ulong)1 << (9*7)) - 1;
+    const ulong ALL_BITS_PARALLEL = ((ulong)1 << (9 * 7)) - 1;
 
     static int[] bit2num = new int[ALL_BITS + 1];
     static int[] num2bit = new int['9' + 1];
@@ -17,9 +17,10 @@ namespace SudokuSolver
     static ulong[] bit2mask = new ulong[ALL_BITS + 1];
     static ulong[] val2bit = new ulong[10] { 0, 1, 2, 4, 8, 16, 32, 64, 128, 256 };
 
-    static int[] cell2square = new int[SIZE];
+    static int[] cell2box = new int[SIZE];
 
     static int iterationCount = 0;
+    static int simpleSolveCount = 0;
 
     static void Main()
     {
@@ -33,6 +34,7 @@ namespace SudokuSolver
 
       Console.WriteLine($"Milliseconds to solve 1,000,000 sudokus: {timer.ElapsedMilliseconds}");
       Console.WriteLine($"Iteration count: {iterationCount}");
+      Console.WriteLine($"SimpleSolve count: {simpleSolveCount}");
     }
 
     static void PrepareAndSolve(string[] sudokus)
@@ -60,7 +62,7 @@ namespace SudokuSolver
 
     static void Prepare()
     {
-      bit2num[0] = 0;
+      bit2num[0] = '0';
       for (int i = 1; i <= (int)ALL_BITS; ++i)
       {
         if (removeBit(i) > 0)
@@ -89,7 +91,7 @@ namespace SudokuSolver
       {
         int row = i / 9;
         int col = i % 9;
-        cell2square[i] = ((row / 3 * 3) + (col / 3));
+        cell2box[i] = ((row / 3 * 3) + (col / 3));
       }
     }
 
@@ -99,36 +101,41 @@ namespace SudokuSolver
       ulong[] puzzleMask = new ulong[SIZE];
       ulong[] row = new ulong[9];
       ulong[] col = new ulong[9];
-      ulong[] square = new ulong[9];
+      ulong[] box = new ulong[9];
 
       for (int i = 0; i < 9; i++)
       {
         row[i] = ALL_BITS_PARALLEL;
         col[i] = ALL_BITS_PARALLEL;
-        square[i] = ALL_BITS_PARALLEL;
+        box[i] = ALL_BITS_PARALLEL;
       }
-
-      // setup puzzles
       for (int i = 0; i < SIZE; i++)
       {
         puzzleMask[i] = ALL_BITS_PARALLEL;
+      }
 
+      // setup puzzles
+      {
+        int shift = 0;
         for (int j = 0; j < PARALLEL_COUNT; j++)
         {
-          ulong val = (ulong)sudokus[j][i] - '0';
-          if (val > 0)
+          for (int i = 0; i < SIZE; i++)
           {
-            int shift = SHIFT * j;
-            ulong bit = val2bit[val] << shift;
-            ulong invBit = ~bit;
+            ulong val = (ulong)sudokus[j][i] - '0';
+            if (val > 0)
+            {
+              ulong bit = val2bit[val] << shift;
+              ulong invBit = ~bit;
 
-            puzzle[i] |= bit;
-            puzzleMask[i] &= ~(bit2mask[val2bit[val]] << shift);
+              puzzle[i] |= bit;
+              puzzleMask[i] &= ~(bit2mask[val2bit[val]] << shift);
 
-            row[i / 9] &= invBit;
-            col[i % 9] &= invBit;
-            square[cell2square[i]] &= invBit;
+              row[i / 9] &= invBit;
+              col[i % 9] &= invBit;
+              box[cell2box[i]] &= invBit;
+            }
           }
+          shift += SHIFT;
         }
       }
 
@@ -137,11 +144,15 @@ namespace SudokuSolver
       {
         iterationCount++;
         progress = false;
-        for (int i = 0; i < SIZE; ++i)
-        {
-          ulong bits = row[i / 9] & col[i % 9] & square[cell2square[i]] & puzzleMask[i];
-          if (bits == 0) continue;
 
+        for (int i = 0; i < SIZE; i++)
+        {
+          if (puzzleMask[i] == 0) continue;
+
+          int r = i / 9;
+          int c = i % 9;
+
+          ulong bits = row[r] & col[c] & box[cell2box[i]] & puzzleMask[i];
           ulong bitsMask = 0;
           ulong bitsLeft = bits;
           int shift = 0;
@@ -165,48 +176,51 @@ namespace SudokuSolver
 
             ulong invBit = ~bits;
             puzzleMask[i] &= ~bitsMask;
-            row[i / 9] &= invBit;
-            col[i % 9] &= invBit;
-            square[cell2square[i]] &= invBit;
+            row[r] &= invBit;
+            col[c] &= invBit;
+            box[cell2box[i]] &= invBit;
 
             progress = true;
           }
         }
       }
 
-      for (int j = 0; j < PARALLEL_COUNT; j++)
+      // check solution
       {
-        for (int i = 0; i < SIZE; i++)
+        int shift = 0;
+        for (int p = 0; p < PARALLEL_COUNT; p++)
         {
-          int shift = j * SHIFT;
-          ulong val = ((puzzle[i] >> shift) & ALL_BITS);
-
-          if (val == 0)
+          for (int i = 0; i < SIZE; i++)
           {
-            SimpleSolve(sudokus[j]);
-            break;
-          }
+            ulong val = ((puzzle[i] >> shift) & ALL_BITS);
 
-          ulong res = (ulong)sudokus[j][i + SIZE + 1] - '0';
-          if (val != val2bit[res])
-          {
-            throw new Exception("FAIL");
+            if (val == 0)
+            {
+              SimpleSolve(sudokus[p]);
+              break;
+            }
+
+            if (bit2num[val] != sudokus[p][i + SIZE + 1])
+              throw new Exception("FAIL");
           }
+          shift += SHIFT;
         }
       }
     }
 
     static void SimpleSolve(string sudoku)
     {
+      simpleSolveCount++;
       int[] puzzle = new int[SIZE];
-      int[,] remain = new int[3, 9];
 
       for (int j = 0; j < SIZE; j++)
         puzzle[j] = sudoku[j];
 
+      int[,] remain = new int[3, 9];
+
       for (int i = 0; i < 3; i++)
         for (int j = 0; j < 9; j++)
-          remain[i,j] = (int)ALL_BITS;
+          remain[i, j] = (int)ALL_BITS;
 
       for (int i = 0; i < SIZE; ++i)
         if (puzzle[i] != '0')
@@ -221,65 +235,62 @@ namespace SudokuSolver
 
     static bool SimpleSolveRecursive(ref int[] puzzle, int[,] remain)
     {
-      while (true)
+      bool progress = true;
+      while (progress)
       {
-        bool progress = true; 
-        while (progress)
-        {
-          progress = false;
-          for (int i = 0; i < SIZE; ++i)
-          {
-            if (puzzle[i] == '0')
-            {
-              int bits = remain[0, i / 9] & remain[1, i % 9] & remain[2, cell2square[i]];
-              if (bits == 0)
-                return false;
-              else if (bit2num[bits] > 0)
-              {
-                SetNumber(i, bits, puzzle, remain);
-                progress = true;
-              }
-            }
-          }
-        }
-
-
+        progress = false;
         for (int i = 0; i < SIZE; ++i)
         {
           if (puzzle[i] == '0')
           {
-            int bits = remain[0, i / 9] & remain[1, i % 9] & remain[2, cell2square[i]];
-            if (isTwoBits(bits))
+            int bits = remain[0, i / 9] & remain[1, i % 9] & remain[2, cell2box[i]];
+            if (bits == 0)
+              return false;
+            else if (bit2num[bits] > 0)
             {
-              int[] puzzleCopy = new int[SIZE];
-              Array.Copy(puzzle, puzzleCopy, SIZE);
-
-              int[,] remainCopy = new int[3,9];
-              for (int j = 0; j < 3; j++)
-                for (int k = 0; k < 9; k++)
-                  remainCopy[j,k] = remain[j,k];
-
-              Array.Copy(puzzle, puzzleCopy, SIZE);
-
-              int bit1 = 1;
-              while ((bit1 & bits) == 0)
-                bit1 <<= 1;
-
-              int bit2 = removeBit(bits);
-
-              SetNumber(i, bit1, puzzle, remain);
-              if (SimpleSolveRecursive(ref puzzle, remain))
-                return true;
-
-              puzzle = puzzleCopy;
-              remain = remainCopy;
-              SetNumber(i, bit2, puzzle, remain);
-              return SimpleSolveRecursive(ref puzzle, remain);
+              SetNumber(i, bits, puzzle, remain);
+              progress = true;
             }
           }
         }
-        return true;
       }
+
+      for (int i = 0; i < SIZE; ++i)
+      {
+        if (puzzle[i] == '0')
+        {
+          int bits = remain[0, i / 9] & remain[1, i % 9] & remain[2, cell2box[i]];
+          if (isTwoBits(bits))
+          {
+            int[] puzzleCopy = new int[SIZE];
+            Array.Copy(puzzle, puzzleCopy, SIZE);
+
+            int[,] remainCopy = new int[3, 9];
+            for (int j = 0; j < 3; j++)
+              for (int k = 0; k < 9; k++)
+                remainCopy[j, k] = remain[j, k];
+
+            Array.Copy(puzzle, puzzleCopy, SIZE);
+
+            int bit1 = 1;
+            while ((bit1 & bits) == 0)
+              bit1 <<= 1;
+
+            int bit2 = removeBit(bits);
+
+            SetNumber(i, bit1, puzzle, remain);
+            if (SimpleSolveRecursive(ref puzzle, remain))
+              return true;
+
+            puzzle = puzzleCopy;
+            remain = remainCopy;
+            SetNumber(i, bit2, puzzle, remain);
+
+            return SimpleSolveRecursive(ref puzzle, remain);
+          }
+        }
+      }
+      return true;
     }
     static void SetNumber(int cell, int bit, int[] puzzle, int[,] remain)
     {
@@ -288,7 +299,7 @@ namespace SudokuSolver
       int invBit = ~bit;
       remain[0, cell / 9] &= invBit;
       remain[1, cell % 9] &= invBit;
-      remain[2, cell2square[cell]] &= invBit;
+      remain[2, cell2box[cell]] &= invBit;
     }
 
     static int removeBit(int val)
