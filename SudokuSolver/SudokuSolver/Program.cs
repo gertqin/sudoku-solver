@@ -8,6 +8,10 @@ namespace SudokuSolver
   class Program
   {
     const int PARALLEL_COUNT = 7;
+    const int PUZZLE_MASK_OFFSET = 81;
+    const int ROW_OFFSET = PUZZLE_MASK_OFFSET + 81;
+    const int COL_OFFSET = ROW_OFFSET + 9;
+    const int BOX_OFFSET = COL_OFFSET + 9;
 
     const char SIZE = (char)81;
     const ulong ALL_BITS = (1 << 9) - 1;
@@ -28,6 +32,7 @@ namespace SudokuSolver
     static long fastSolveTime = 0;
     static long simpleSolveTime = 0;
     static long checkSolutionTime = 0;
+
 
     static void Main()
     {
@@ -113,42 +118,44 @@ namespace SudokuSolver
 #if TIME
       var timer = Stopwatch.StartNew();
 #endif
-      ulong[] puzzle = new ulong[SIZE];
-      ulong[] puzzleMask = new ulong[SIZE];
-      ulong[] row = new ulong[9];
-      ulong[] col = new ulong[9];
-      ulong[] box = new ulong[9];
+      ulong[] data = new ulong[BOX_OFFSET + 9];
 
-      for (int i = 0; i < 9; i++)
+      unsafe
       {
-        row[i] = ALL_BITS_PARALLEL;
-        col[i] = ALL_BITS_PARALLEL;
-        box[i] = ALL_BITS_PARALLEL;
-      }
+        fixed (ulong* puzzle = &data[0], puzzleMask = &data[PUZZLE_MASK_OFFSET], row = &data[ROW_OFFSET], col = &data[COL_OFFSET], box = &data[BOX_OFFSET], n2b = num2bit, n2m = num2mask)
+        {
+          for (int i = 0; i < 9; i++)
+          {
+            row[i] = ALL_BITS_PARALLEL;
+            col[i] = ALL_BITS_PARALLEL;
+            box[i] = ALL_BITS_PARALLEL;
+          }
 
-      // setup puzzles
-      for (int i = 0; i < SIZE; i++)
-      {
-        puzzle[i] = num2bit[sudokus[0][i]]
-          | (num2bit[sudokus[1][i]] << 9)
-          | (num2bit[sudokus[2][i]] << 18)
-          | (num2bit[sudokus[3][i]] << 27)
-          | (num2bit[sudokus[4][i]] << 36)
-          | (num2bit[sudokus[5][i]] << 45)
-          | (num2bit[sudokus[6][i]] << 54);
+          // setup puzzles
+          for (int i = 0; i < SIZE; i++)
+          {
+            puzzle[i] = n2b[sudokus[0][i]]
+              | (n2b[sudokus[1][i]] << 9)
+              | (n2b[sudokus[2][i]] << 18)
+              | (n2b[sudokus[3][i]] << 27)
+              | (n2b[sudokus[4][i]] << 36)
+              | (n2b[sudokus[5][i]] << 45)
+              | (n2b[sudokus[6][i]] << 54);
 
-        puzzleMask[i] = num2mask[sudokus[0][i]]
-          | (num2mask[sudokus[1][i]] << 9)
-          | (num2mask[sudokus[2][i]] << 18)
-          | (num2mask[sudokus[3][i]] << 27)
-          | (num2mask[sudokus[4][i]] << 36)
-          | (num2mask[sudokus[5][i]] << 45)
-          | (num2mask[sudokus[6][i]] << 54);
+            puzzleMask[i] = n2m[sudokus[0][i]]
+              | (n2m[sudokus[1][i]] << 9)
+              | (n2m[sudokus[2][i]] << 18)
+              | (n2m[sudokus[3][i]] << 27)
+              | (n2m[sudokus[4][i]] << 36)
+              | (n2m[sudokus[5][i]] << 45)
+              | (n2m[sudokus[6][i]] << 54);
 
-        ulong ibits = ~puzzle[i];
-        row[i / 9] &= ibits;
-        col[i % 9] &= ibits;
-        box[cell2box[i]] &= ibits;
+            ulong ibits = ~puzzle[i];
+            row[i / 9] &= ibits;
+            col[i % 9] &= ibits;
+            box[cell2box[i]] &= ibits;
+          }
+        }
       }
 
 #if TIME
@@ -157,44 +164,49 @@ namespace SudokuSolver
       timer.Restart();
 #endif
 
-      int maxIterations = 4;
-      do
+      unsafe
       {
-#if TIME
-        iterationCount++;
-#endif
-
-        for (int i = 0; i < SIZE; i++)
+        fixed (ulong* puzzle = &data[0], puzzleMask = &data[PUZZLE_MASK_OFFSET], row = &data[ROW_OFFSET], col = &data[COL_OFFSET], box = &data[BOX_OFFSET], b2m = bit2mask)
         {
-          if (puzzleMask[i] == 0) continue;
-
-          int r = i / 9;
-          int c = i % 9;
-
-          ulong bits = row[r] & col[c] & box[cell2box[i]] & puzzleMask[i];
-
-          ulong bitsMask = bit2mask[bits & ALL_BITS]
-            | bit2mask[(bits >> 9) & ALL_BITS] << 9
-            | bit2mask[(bits >> 18) & ALL_BITS] << 18
-            | bit2mask[(bits >> 27) & ALL_BITS] << 27
-            | bit2mask[(bits >> 36) & ALL_BITS] << 36
-            | bit2mask[(bits >> 45) & ALL_BITS] << 45
-            | bit2mask[bits >> 54] << 54;
-
-          bits &= bitsMask;
-
-          if (bits > 0)
+          int maxIterations = 4;
+          do
           {
-            puzzle[i] |= bits;
+#if TIME
+            iterationCount++;
+#endif
+            for (int i = 0; i < SIZE; i++)
+            {
+              if (puzzleMask[i] == 0) continue;
 
-            ulong ibit = ~bits;
-            puzzleMask[i] &= ~bitsMask;
-            row[r] &= ibit;
-            col[c] &= ibit;
-            box[cell2box[i]] &= ibit;
-          }
+              int r = i / 9;
+              int c = i % 9;
+
+              ulong bits = row[r] & col[c] & box[cell2box[i]] & puzzleMask[i];
+
+              ulong bitsMask = b2m[bits & ALL_BITS]
+                | b2m[(bits >> 9) & ALL_BITS] << 9
+                | b2m[(bits >> 18) & ALL_BITS] << 18
+                | b2m[(bits >> 27) & ALL_BITS] << 27
+                | b2m[(bits >> 36) & ALL_BITS] << 36
+                | b2m[(bits >> 45) & ALL_BITS] << 45
+                | b2m[bits >> 54] << 54;
+
+              bits &= bitsMask;
+
+              if (bits > 0)
+              {
+                puzzle[i] |= bits;
+
+                ulong ibit = ~bits;
+                puzzleMask[i] &= ~bitsMask;
+                row[r] &= ibit;
+                col[c] &= ibit;
+                box[cell2box[i]] &= ibit;
+              }
+            }
+          } while (maxIterations-- > 0);
         }
-      } while (maxIterations-- > 0);
+      }
 
 #if TIME
       timer.Stop();
@@ -202,17 +214,23 @@ namespace SudokuSolver
       timer.Restart();
 #endif
 
-      for (int i = 0; i < SIZE; i++)
+      unsafe
       {
-        if (puzzleMask[i] > 0)
+        fixed (ulong* puzzle = &data[0], puzzleMask = &data[PUZZLE_MASK_OFFSET])
         {
-          if ((puzzle[i] & ALL_BITS) == 0) SimpleSolve(puzzle, row, col, box, 0);
-          if (((puzzle[i] >> 9) & ALL_BITS) == 0) SimpleSolve(puzzle, row, col, box, 9);
-          if (((puzzle[i] >> 18) & ALL_BITS) == 0) SimpleSolve(puzzle, row, col, box, 18);
-          if (((puzzle[i] >> 27) & ALL_BITS) == 0) SimpleSolve(puzzle, row, col, box, 27);
-          if (((puzzle[i] >> 36) & ALL_BITS) == 0) SimpleSolve(puzzle, row, col, box, 36);
-          if (((puzzle[i] >> 45) & ALL_BITS) == 0) SimpleSolve(puzzle, row, col, box, 45);
-          if ((puzzle[i] >> 54) == 0) SimpleSolve(puzzle, row, col, box, 54);
+          for (int i = 0; i < SIZE; i++)
+          {
+            if (puzzleMask[i] > 0)
+            {
+              if ((puzzle[i] & ALL_BITS) == 0) SimpleSolve(data, 0);
+              if (((puzzle[i] >> 9) & ALL_BITS) == 0) SimpleSolve(data, 9);
+              if (((puzzle[i] >> 18) & ALL_BITS) == 0) SimpleSolve(data, 18);
+              if (((puzzle[i] >> 27) & ALL_BITS) == 0) SimpleSolve(data, 27);
+              if (((puzzle[i] >> 36) & ALL_BITS) == 0) SimpleSolve(data, 36);
+              if (((puzzle[i] >> 45) & ALL_BITS) == 0) SimpleSolve(data, 45);
+              if ((puzzle[i] >> 54) == 0) SimpleSolve(data, 54);
+            }
+          }
         }
       }
 
@@ -222,19 +240,25 @@ namespace SudokuSolver
       timer.Restart();
 #endif
 
-      // check solution
-      for (int i = 0; i < SIZE; i++)
+      unsafe
       {
-        int resIdx = SIZE + 1 + i;
-        var res = num2bit[sudokus[0][resIdx]]
-          | (num2bit[sudokus[1][resIdx]] << 9)
-          | (num2bit[sudokus[2][resIdx]] << 18)
-          | (num2bit[sudokus[3][resIdx]] << 27)
-          | (num2bit[sudokus[4][resIdx]] << 36)
-          | (num2bit[sudokus[5][resIdx]] << 45)
-          | (num2bit[sudokus[6][resIdx]] << 54);
-        if (puzzle[i] != res)
-          throw new Exception("FAIL");
+        fixed (ulong* puzzle = &data[0], n2b = num2bit)
+        {
+          // check solution
+          for (int i = 0; i < SIZE; i++)
+          {
+            int resIdx = SIZE + 1 + i;
+            var res = n2b[sudokus[0][resIdx]]
+              | (n2b[sudokus[1][resIdx]] << 9)
+              | (n2b[sudokus[2][resIdx]] << 18)
+              | (n2b[sudokus[3][resIdx]] << 27)
+              | (n2b[sudokus[4][resIdx]] << 36)
+              | (n2b[sudokus[5][resIdx]] << 45)
+              | (n2b[sudokus[6][resIdx]] << 54);
+            if (puzzle[i] != res)
+              throw new Exception("FAIL");
+          }
+        }
       }
 
 #if TIME
@@ -267,6 +291,29 @@ namespace SudokuSolver
           throw new Exception("FAIL");
     }
 
+    static void SimpleSolve(ulong[] data, int shift)
+    {
+#if TIME
+      simpleSolveCount++;
+#endif
+
+      int[] puzzle = new int[SIZE];
+      int[,] remain = new int[3, 9];
+      for (int i = 0; i < SIZE; i++)
+        puzzle[i] = (int)((data[i] >> shift) & ALL_BITS);
+
+      for (int i = 0; i < 9; i++)
+      {
+        remain[0,i] = (int)((data[i + ROW_OFFSET] >> shift) & ALL_BITS);
+        remain[1,i] = (int)((data[i + COL_OFFSET] >> shift) & ALL_BITS);
+        remain[2,i] = (int)((data[i + BOX_OFFSET] >> shift) & ALL_BITS);
+      }
+
+      SimpleSolveRecursive(ref puzzle, remain);
+
+      for (int i = 0; i < SIZE; i++)
+        data[i] |= (ulong)puzzle[i] << shift;
+    }
     static void SimpleSolve(ulong[] puzzles, ulong[] row, ulong[] col, ulong[] box, int shift)
     {
 #if TIME

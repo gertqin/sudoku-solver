@@ -1,5 +1,5 @@
 *.exe
 sudoku.csv
-SudokuSolver/.vs/*
 bin
 obj
+.vs
