@@ -1,9 +1,6 @@
 *.exe
 sudoku.csv
-SudokuSolver/.vs/SudokuSolver/DesignTimeBuild/.dtbcache
-SudokuSolver/.vs/SudokuSolver/v16/.suo
-SudokuSolver/.vs/SudokuSolver/v16/Server/sqlite3/db.lock
-SudokuSolver/.vs/SudokuSolver/v16/Server/sqlite3/storage.ide
+SudokuSolver/.vs/*
 SudokuSolver/SudokuSolver/bin/Debug/netcoreapp3.1/SudokuSolver.deps.json
 SudokuSolver/SudokuSolver/bin/Debug/netcoreapp3.1/SudokuSolver.dll
 SudokuSolver/SudokuSolver/bin/Debug/netcoreapp3.1/SudokuSolver.pdb
