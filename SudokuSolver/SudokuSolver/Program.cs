@@ -6,7 +6,7 @@ namespace SudokuSolver
   {
     static void Main()
     {
-      Solver2.Solve();
+      Solver2.Run();
     }
   }
 }
