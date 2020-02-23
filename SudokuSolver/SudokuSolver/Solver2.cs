@@ -1,12 +1,11 @@
-﻿#define TIME 
+﻿#define CHECK_SOLUTION
 
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
-using System.Text;
 using System.Threading;
 
 namespace SudokuSolver
@@ -24,11 +23,6 @@ namespace SudokuSolver
 
     const ushort NINE_BITS_MASK = (1 << 9) - 1;
 
-    static int[] bit2num = new int[NINE_BITS_MASK + 1];
-    static ushort[] num2bit = new ushort['9' + 1];
-
-    static int[] cell2row = new int[SUDOKU_CELL_COUNT];
-    static int[] cell2col = new int[SUDOKU_CELL_COUNT];
     static int[] cell2box = new int[SUDOKU_CELL_COUNT];
 
     static int failed = 0;
@@ -69,33 +63,10 @@ namespace SudokuSolver
 
     static void GlobalSetup()
     {
-      bit2num[0] = 0;
-      for (int i = 1; i <= NINE_BITS_MASK; ++i)
-      {
-        if ((i & (i - 1)) > 0)
-        {
-          bit2num[i] = 0;
-        }
-        else
-        { // single bit number
-          int bit = i;
-          int num = 1;
-          while ((bit >>= 1) > 0)
-            num++;
-
-          bit2num[i] = num;
-        }
-      }
-
-      for (int i = '1'; i <= '9'; i++)
-        num2bit[i] = (ushort)(1 << (i - '1'));
-
       for (int i = 0; i < SUDOKU_CELL_COUNT; i++)
       {
         int row = i / 9;
         int col = i % 9;
-        cell2row[i] = row << 4;
-        cell2col[i] = col << 4;
         cell2box[i] = ((row / 3 * 3) + (col / 3)) << 4;
       }
     }
@@ -109,7 +80,10 @@ namespace SudokuSolver
       Span<ushort> solutions = stackalloc ushort[SUDOKU_CELL_COUNT << 4];
 
       ExtractSudokus(importSudokus, puzzles);
+
+#if CHECK_SOLUTION
       ExtractSudokus(importSudokus.Slice(SUDOKU_CELL_COUNT + 1), solutions);
+#endif
 
       Solve16Sudokus(data, puzzles, solutions);
     }
@@ -133,90 +107,105 @@ namespace SudokuSolver
 
       SolveRemainingStep(data);
 
+#if CHECK_SOLUTION
       CheckSolutions(data, solutions);
+#endif
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static void SetupStep(Span<ushort> data, Span<ushort> puzzleChars)
     {
       unsafe
       {
-        fixed (ushort* puzzleChar = &puzzleChars[0], puzzle = &data[0], row = &data[ROW_OFFSET], col = &data[COL_OFFSET], box = &data[BOX_OFFSET])
+        fixed (ushort* p_puzzleChars = &puzzleChars[0], p_puzzles = &data[0], p_rows = &data[ROW_OFFSET], p_cols = &data[COL_OFFSET], p_boxs = &data[BOX_OFFSET])
         {
-          for (int i = 0; i < (9 << 4); i++)
+          int filterMax = 9 << 4;
+          for (int i = 0; i < filterMax; i++)
           {
-            row[i] = NINE_BITS_MASK;
-            col[i] = NINE_BITS_MASK;
-            box[i] = NINE_BITS_MASK;
+            p_rows[i] = NINE_BITS_MASK;
+            p_cols[i] = NINE_BITS_MASK;
+            p_boxs[i] = NINE_BITS_MASK;
           }
 
           var vectorCharOffset = Vector256.Create('0');
           var vectorOnes = Vector256.Create((uint)1);
 
+          int r = 0, c = 0;
           for (int i = 0; i < SUDOKU_CELL_COUNT; i++)
           {
             // subtract '0' from all input values
-            var cellsInBase10 = Avx2.Subtract(Avx.LoadVector256(&puzzleChar[i << 4]), vectorCharOffset);
+            var cellsInBase10 = Avx2.Subtract(Avx.LoadVector256(&p_puzzleChars[i << 4]), vectorCharOffset);
+            var cellsInBase2 = ConvertBase10ToBase2(cellsInBase10, vectorOnes);
 
-            // convert values to bits (in low/high as only uint can be shifted) 
-            var lowCellsInBase2 = Avx2.ConvertToVector256Int32(Avx2.ExtractVector128(cellsInBase10, 0)).AsUInt32();
-            lowCellsInBase2 = Avx2.ShiftRightLogical(Avx2.ShiftLeftLogicalVariable(vectorOnes, lowCellsInBase2), 1);
+            Avx.Store(&p_puzzles[i << 4], cellsInBase2);
 
-            var highCellsInBase2 = Avx2.ConvertToVector256Int32(Avx2.ExtractVector128(cellsInBase10, 1)).AsUInt32();
-            highCellsInBase2 = Avx2.ShiftRightLogical(Avx2.ShiftLeftLogicalVariable(vectorOnes, highCellsInBase2), 1);
+            ushort* p_row = &p_rows[r << 4], p_col = &p_cols[c << 4], p_box = &p_boxs[cell2box[i]];
+            Avx.Store(p_row, Avx2.AndNot(cellsInBase2, Avx.LoadVector256(p_row)));
+            Avx.Store(p_col, Avx2.AndNot(cellsInBase2, Avx.LoadVector256(p_col)));
+            Avx.Store(p_box, Avx2.AndNot(cellsInBase2, Avx.LoadVector256(p_box)));
 
-            var cellsInBase2 = Avx2.PackUnsignedSaturate(lowCellsInBase2.AsInt32(), highCellsInBase2.AsInt32()); // pack into low[1..64], high[1..64], low[65..128], high[65..128]
-            cellsInBase2 = Avx2.Permute4x64(cellsInBase2.AsUInt64(), 0xD8).AsUInt16(); // shuffle packed bytes into order 0xD8 = 00 10 01 11 = 1,3,2,4
-
-            Avx.Store(&puzzle[i << 4], cellsInBase2);
-
-            ushort* r = &row[cell2row[i]], c = &col[cell2col[i]], b = &box[cell2box[i]];
-            Avx.Store(r, Avx2.AndNot(cellsInBase2, Avx.LoadVector256(r)));
-            Avx.Store(c, Avx2.AndNot(cellsInBase2, Avx.LoadVector256(c)));
-            Avx.Store(b, Avx2.AndNot(cellsInBase2, Avx.LoadVector256(b)));
+            ++c;
+            if (c == 9)
+            {
+              c = 0;
+              ++r;
+            }
           }
         }
       }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static void SolveStep(Span<ushort> data, int iterations)
     {
       unsafe
       {
-        fixed (ushort* puzzle = &data[0], row = &data[ROW_OFFSET], col = &data[COL_OFFSET], box = &data[BOX_OFFSET])
+        fixed (ushort* p_puzzles = &data[0], p_rows = &data[ROW_OFFSET], p_cols = &data[COL_OFFSET], p_boxs = &data[BOX_OFFSET])
         {
           do
           {
+            int r = 0, c = 0;
             for (int i = 0; i != SUDOKU_CELL_COUNT; ++i)
             {
-              var p = &puzzle[i << 4];
+              var p_puzzle = &p_puzzles[i << 4];
 
-              if (Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(p), Vector256<ushort>.Zero).AsByte()) == 0) continue;
-
-              ushort* r = &row[cell2row[i]], c = &col[cell2col[i]], b = &box[cell2box[i]];
-
-              Vector256<ushort> bits = Avx2.Or(
-                Avx2.And(Avx2.And(Avx.LoadVector256(r), Avx.LoadVector256(c)), Avx.LoadVector256(b)),
-                Avx.LoadVector256(p)
-              );
-
-              var mask = Avx2.CompareGreaterThan(Vector256.Create((short)3), bits.AsInt16()).AsUInt16();
-              var po2 = Vector256.Create((ushort)4);
-              mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-              mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-              mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-              mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-              mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-              mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-              mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2));
-
-              if (Avx2.MoveMask(mask.AsByte()) != 0)
+              if (Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(p_puzzle), Vector256<ushort>.Zero).AsByte()) != 0)
               {
-                bits = Avx2.And(mask, bits);
-                Avx.Store(p, Avx2.Or(bits, Avx.LoadVector256(p)));
+                ushort* p_row = &p_rows[r << 4],
+                  p_col = &p_cols[c << 4],
+                  p_box = &p_boxs[cell2box[i]];
 
-                Avx.Store(r, Avx2.AndNot(bits, Avx.LoadVector256(r)));
-                Avx.Store(c, Avx2.AndNot(bits, Avx.LoadVector256(c)));
-                Avx.Store(b, Avx2.AndNot(bits, Avx.LoadVector256(b)));
+                Vector256<ushort> bits = Avx2.Or(
+                  Avx2.And(Avx2.And(Avx.LoadVector256(p_row), Avx.LoadVector256(p_col)), Avx.LoadVector256(p_box)),
+                  Avx.LoadVector256(p_puzzle)
+                );
+
+                var mask = Avx2.CompareGreaterThan(Vector256.Create((short)3), bits.AsInt16()).AsUInt16();
+                var po2 = Vector256.Create((ushort)4);
+                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
+                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
+                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
+                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
+                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
+                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
+                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2));
+
+                if (Avx2.MoveMask(mask.AsByte()) != 0)
+                {
+                  bits = Avx2.And(mask, bits);
+                  Avx.Store(p_puzzle, Avx2.Or(bits, Avx.LoadVector256(p_puzzle)));
+
+                  Avx.Store(p_row, Avx2.AndNot(bits, Avx.LoadVector256(p_row)));
+                  Avx.Store(p_col, Avx2.AndNot(bits, Avx.LoadVector256(p_col)));
+                  Avx.Store(p_box, Avx2.AndNot(bits, Avx.LoadVector256(p_box)));
+                }
+              }
+
+              ++c;
+              if (c == 9)
+              {
+                c = 0;
+                ++r;
               }
             }
           } while (--iterations > 0);
@@ -224,15 +213,16 @@ namespace SudokuSolver
       }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static void SolveRemainingStep(Span<ushort> data)
     {
       unsafe
       {
-        fixed (ushort* puzzle = &data[0])
+        fixed (ushort* p_puzzles = &data[0])
         {
           for (int i = 0; i != ROW_OFFSET; i += 16)
           {
-            var mask = Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(&puzzle[i]), Vector256<ushort>.Zero).AsByte());
+            var mask = Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(&p_puzzles[i]), Vector256<ushort>.Zero).AsByte());
             if (mask != 0)
             {
               for (int j = 0; j != 16; ++j)
@@ -252,72 +242,92 @@ namespace SudokuSolver
     {
       unsafe
       {
-        fixed (ushort* puzzle = &data[puzzleOffset], row = &data[ROW_OFFSET + puzzleOffset], col = &data[COL_OFFSET + puzzleOffset], box = &data[BOX_OFFSET + puzzleOffset])
+        fixed (ushort* p_puzzles = &data[puzzleOffset], p_rows = &data[ROW_OFFSET + puzzleOffset], p_cols = &data[COL_OFFSET + puzzleOffset], p_boxs = &data[BOX_OFFSET + puzzleOffset])
         {
           bool progress = false;
           do
           {
             progress = false;
+            int r = 0, c = 0;
             for (int i = 0; i != SUDOKU_CELL_COUNT; ++i)
             {
-              ushort* p = &puzzle[i << 4];
+              ushort* p_puzzle = &p_puzzles[i << 4];
 
-              if (*p > 0) continue;
-
-              ushort* r = &row[cell2row[i]], c = &col[cell2col[i]], b = &box[cell2box[i]];
-              uint bits = (uint)(*r & *c & *b);
-
-              uint bitCount = Popcnt.PopCount(bits);
-              if (bitCount == 0)
-                return false;
-              else if (bitCount == 1)
+              if (*p_puzzle == 0)
               {
-                *p = (ushort)bits;
-                *r = (ushort)(*r & ~bits);
-                *c = (ushort)(*c & ~bits);
-                *b = (ushort)(*b & ~bits);
+                ushort* p_row = &p_rows[r << 4], p_col = &p_cols[c << 4], p_box = &p_boxs[cell2box[i]];
+                uint bits = (uint)(*p_row & *p_col & *p_box);
 
-                progress = true;
+                uint bitCount = Popcnt.PopCount(bits);
+                if (bitCount == 0)
+                  return false;
+                else if (bitCount == 1)
+                {
+                  *p_puzzle = (ushort)bits;
+                  *p_row = (ushort)(*p_row & ~bits);
+                  *p_col = (ushort)(*p_col & ~bits);
+                  *p_box = (ushort)(*p_box & ~bits);
+
+                  progress = true;
+                }
+              }
+
+              ++c;
+              if (c == 9)
+              {
+                c = 0;
+                ++r;
               }
             }
           } while (progress);
 
           // check if guess is needed
-          for (int i = 0; i < SUDOKU_CELL_COUNT; ++i)
           {
-            ushort* p = &puzzle[i << 4];
-            if (*p > 0) continue;
-
-            ushort* r = &row[cell2row[i]], c = &col[cell2col[i]], b = &box[cell2box[i]];
-            uint bits = (uint)(*r & *c & *b);
-
-            if (Popcnt.PopCount(bits) == 2)
+            int r = 0, c = 0;
+            for (int i = 0; i < SUDOKU_CELL_COUNT; ++i)
             {
-              Span<ushort> dataCopy = stackalloc ushort[DATA_LENGTH];
-              data.CopyTo(dataCopy);
+              ushort* p_puzzle = &p_puzzles[i << 4];
+              if (*p_puzzle == 0)
+              {
+                ushort* p_row = &p_rows[r << 4], p_col = &p_cols[c << 4], p_box = &p_boxs[cell2box[i]];
+                uint bits = (uint)(*p_row & *p_col & *p_box);
 
-              uint bit1 = 1;
-              while ((bit1 & bits) == 0)
-                bit1 <<= 1;
+                if (Popcnt.PopCount(bits) == 2)
+                {
+                  Span<ushort> dataCopy = stackalloc ushort[DATA_LENGTH];
+                  data.CopyTo(dataCopy);
 
-              uint bit2 = Bmi1.ResetLowestSetBit(bits);
+                  uint bit1 = 1;
+                  while ((bit1 & bits) == 0)
+                    bit1 <<= 1;
 
-              *p = (ushort)bit1;
-              *r = (ushort)(*r & ~bit1);
-              *c = (ushort)(*c & ~bit1);
-              *b = (ushort)(*b & ~bit1);
+                  uint bit2 = Bmi1.ResetLowestSetBit(bits);
 
-              if (SolveSingleStep(data, puzzleOffset))
-                return true;
+                  *p_puzzle = (ushort)bit1;
+                  *p_row = (ushort)(*p_row & ~bit1);
+                  *p_col = (ushort)(*p_col & ~bit1);
+                  *p_box = (ushort)(*p_box & ~bit1);
 
-              dataCopy.CopyTo(data);
+                  if (SolveSingleStep(data, puzzleOffset))
+                    return true;
 
-              *p = (ushort)bit2;
-              *r = (ushort)(*r & ~bit2);
-              *c = (ushort)(*c & ~bit2);
-              *b = (ushort)(*b & ~bit2);
+                  dataCopy.CopyTo(data);
 
-              return SolveSingleStep(data, puzzleOffset);
+                  *p_puzzle = (ushort)bit2;
+                  *p_row = (ushort)(*p_row & ~bit2);
+                  *p_col = (ushort)(*p_col & ~bit2);
+                  *p_box = (ushort)(*p_box & ~bit2);
+
+                  return SolveSingleStep(data, puzzleOffset);
+                }
+              }
+
+              ++c;
+              if (c == 9)
+              {
+                c = 0;
+                ++r;
+              }
             }
           }
         }
@@ -325,68 +335,23 @@ namespace SudokuSolver
       return true;
     }
 
-    static bool GuessStep(Span<ushort> data, int puzzleOffset)
-    {
-      unsafe
-      {
-        fixed (ushort* puzzle = &data[puzzleOffset], row = &data[ROW_OFFSET + puzzleOffset], col = &data[COL_OFFSET + puzzleOffset], box = &data[BOX_OFFSET + puzzleOffset])
-        {
-          for (int i = 0; i < ROW_OFFSET; i += 16)
-          {
-            if (puzzle[i] != 0) continue;
 
-            int cell = i >> 4;
-            ushort* r = &row[cell2row[cell]], c = &col[cell2col[cell]], b = &box[cell2box[cell]];
-
-            uint bits = (uint)(*r & *c & *b);
-
-            if (Popcnt.PopCount(bits) == 2)
-            {
-              Span<ushort> dataCopy = stackalloc ushort[DATA_LENGTH];
-              data.CopyTo(dataCopy);
-
-              uint bit1 = 1;
-              while ((bit1 & bits) == 0)
-                bit1 <<= 1;
-
-              uint bit2 = Bmi1.ResetLowestSetBit(bits);
-
-              puzzle[i] = (ushort)bit1;
-              *r = (ushort)(*r & ~bit1);
-              *c = (ushort)(*c & ~bit1);
-              *b = (ushort)(*b & ~bit1);
-
-              // TODO solve
-
-              dataCopy.CopyTo(data);
-
-              puzzle[i] = (ushort)bit2;
-              *r = (ushort)(*r & ~bit2);
-              *c = (ushort)(*c & ~bit2);
-              *b = (ushort)(*b & ~bit2);
-
-              return true;
-            }
-          }
-        }
-        return false;
-      }
-    }
-
-
-
-
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static void CheckSolutions(Span<ushort> data, Span<ushort> solutions)
     {
       unsafe
       {
-        fixed (ushort* puzzle = &data[0], solution = &solutions[0], n2b = num2bit)
+        fixed (ushort* p_puzzles = &data[0], p_solution = &solutions[0])
         {
+          var vectorCharOffset = Vector256.Create('0');
+          var vectorOnes = Vector256.Create((uint)1);
+
           // check solution
-          for (int i = 0; i < SUDOKU_CELL_COUNT << 4; i++)
+          for (int i = 0; i < SUDOKU_CELL_COUNT; i++)
           {
-            var res = n2b[solution[i]];
-            if (puzzle[i] != res)
+            var solutionCellsBase10 = Avx2.Subtract(Avx.LoadVector256(&p_solution[i << 4]), vectorCharOffset);
+            var solutionCellsBase2 = ConvertBase10ToBase2(solutionCellsBase10, vectorOnes);
+            if ((uint)Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(&p_puzzles[i << 4]), solutionCellsBase2).AsByte()) != 0xFFFFFFFF)
             {
               failed++;
               break;
@@ -396,8 +361,34 @@ namespace SudokuSolver
       }
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static Vector256<ushort> ConvertBase10ToBase2(Vector256<ushort> cellsInBase10, Vector256<uint> vectorOnes)
+    {
+      // convert values to bits (in low/high as only uint can be shifted) 
+      var lowCellsInBase2 = Avx2.ConvertToVector256Int32(Avx2.ExtractVector128(cellsInBase10, 0)).AsUInt32();
+      lowCellsInBase2 = Avx2.ShiftRightLogical(Avx2.ShiftLeftLogicalVariable(vectorOnes, lowCellsInBase2), 1);
+
+      var highCellsInBase2 = Avx2.ConvertToVector256Int32(Avx2.ExtractVector128(cellsInBase10, 1)).AsUInt32();
+      highCellsInBase2 = Avx2.ShiftRightLogical(Avx2.ShiftLeftLogicalVariable(vectorOnes, highCellsInBase2), 1);
+
+      var cellsInBase2 = Avx2.PackUnsignedSaturate(lowCellsInBase2.AsInt32(), highCellsInBase2.AsInt32()); // pack into low[1..64], high[1..64], low[65..128], high[65..128]
+      cellsInBase2 = Avx2.Permute4x64(cellsInBase2.AsUInt64(), 0xD8).AsUInt16(); // shuffle packed bytes into order 0xD8 = 00 10 01 11 = 1,3,2,4
+      return cellsInBase2;
+    }
+
     static string PrintSudoku(Span<ushort> data)
     {
+      int[] bit2num = new int[NINE_BITS_MASK + 1];
+      bit2num[0] = 0;
+      int num = 1, bit = 1;
+
+      while (num <= 9)
+      {
+        bit2num[bit] = num;
+        bit <<= 1;
+        ++num;
+      } 
+
       string res = "";
       for (int i = 0; i < SUDOKU_CELL_COUNT; i++)
       {
