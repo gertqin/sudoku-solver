@@ -3,7 +3,9 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
 using System.Threading;
@@ -29,25 +31,22 @@ namespace SudokuSolver
 
     public static void Run()
     {
-      //using (var fs = File.OpenRead("../../../../../sudoku.csv"))
-      //{
-      //  byte[] data = new byte[2];
-      //  fs.Read(data, 0, 2);
-      //}
+      long readInputMs = 0;
+      var timer = Stopwatch.StartNew();
 
       var bytes = File.ReadAllBytes("../../../../../sudoku.csv");
 
-      Thread.Sleep(1000);
-
-      var timer = Stopwatch.StartNew();
-
+      timer.Stop();
+      readInputMs = timer.ElapsedMilliseconds;
+      timer.Restart();
 
       SolveAllSudokus(bytes);
 
       timer.Stop();
 
-      Console.WriteLine($"Milliseconds to solve 1,000,000 sudokus: {timer.ElapsedMilliseconds}");
-      Console.WriteLine($"Failed: {failed}");
+      Console.WriteLine($"Time to read input: {readInputMs}ms");
+      Console.WriteLine($"Time to solve 1,000,000 sudokus: {timer.ElapsedMilliseconds}ms");
+      Console.WriteLine($"Failed sudokus: {failed}");
     }
 
     static void SolveAllSudokus(byte[] bytes)
@@ -79,24 +78,109 @@ namespace SudokuSolver
       Span<ushort> puzzles = stackalloc ushort[SUDOKU_CELL_COUNT << 4];
       Span<ushort> solutions = stackalloc ushort[SUDOKU_CELL_COUNT << 4];
 
-      ExtractSudokus(importSudokus, puzzles);
+      TransposeSudokus(importSudokus, puzzles);
 
 #if CHECK_SOLUTION
-      ExtractSudokus(importSudokus.Slice(SUDOKU_CELL_COUNT + 1), solutions);
+      TransposeSudokus(importSudokus.Slice(SUDOKU_CELL_COUNT + 1), solutions);
 #endif
 
       Solve16Sudokus(data, puzzles, solutions);
     }
 
     // either puzzles or solutions
-    static void ExtractSudokus(Span<byte> importSudokus, Span<ushort> parallelSudokus)
+    static void TransposeSudokus(Span<byte> importSudokus, Span<ushort> parallelSudokus)
     {
-      for (int p = 0; p < 16; ++p)
+      unsafe
       {
-        int importOffset = p * BYTES_PER_SUDOKU;
-        for (int i = 0; i < SUDOKU_CELL_COUNT; ++i)
-          parallelSudokus[(i << 4) + p] = importSudokus[importOffset + i];
+        fixed (byte* p_importSudokus = &importSudokus[0])
+        fixed (ushort* p_parallelSudokus = &parallelSudokus[0])
+        {
+          byte* p_src = p_importSudokus;
+          ushort* p_dest = p_parallelSudokus;
+
+          // 5x16 = 80
+          for (int i = 0; i < 5; i++)
+          {
+            // solve 16x16
+            Transpose8x16(p_src, p_dest);
+            Transpose8x16(p_src + (BYTES_PER_SUDOKU << 3), p_dest + 8);
+
+            p_src += 16;
+            p_dest += (1 << 8);
+          }
+
+          for (int i = 0; i < 16; i++)
+          {
+            *p_dest = *p_src;
+            p_src += BYTES_PER_SUDOKU;
+            ++p_dest;
+          }
+        }
       }
+    }
+
+    // transpose 8 rows x 16 cols, with input in bytes and output in ushorts
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static unsafe void Transpose8x16(byte *p_src, ushort *p_dest)
+    {
+      var v1 = Avx2.ConvertToVector256Int16(p_src).AsUInt16(); p_src += BYTES_PER_SUDOKU; // a1,b1,c1,...,p1
+      var v2 = Avx2.ConvertToVector256Int16(p_src).AsUInt16(); p_src += BYTES_PER_SUDOKU; // a2,b2,c2,...,p2
+      var v3 = Avx2.ConvertToVector256Int16(p_src).AsUInt16(); p_src += BYTES_PER_SUDOKU;
+      var v4 = Avx2.ConvertToVector256Int16(p_src).AsUInt16(); p_src += BYTES_PER_SUDOKU;
+      var v5 = Avx2.ConvertToVector256Int16(p_src).AsUInt16(); p_src += BYTES_PER_SUDOKU;
+      var v6 = Avx2.ConvertToVector256Int16(p_src).AsUInt16(); p_src += BYTES_PER_SUDOKU;
+      var v7 = Avx2.ConvertToVector256Int16(p_src).AsUInt16(); p_src += BYTES_PER_SUDOKU; // a7,b7,c7,...,p7
+      var v8 = Avx2.ConvertToVector256Int16(p_src).AsUInt16();                           
+
+      var lo12 = Avx2.UnpackLow(v1, v2); // a1,a2,b1,...,d2,i1,i2,k1,...,l2
+      var lo34 = Avx2.UnpackLow(v3, v4); // a3,a4,b3,...,d2,i3,i4,k3,...,l4
+      var lo56 = Avx2.UnpackLow(v5, v6);
+      var lo78 = Avx2.UnpackLow(v7, v8);
+      var hi12 = Avx2.UnpackHigh(v1, v2); // e1,e2,f1,...,h2,m1,m2,...,p2
+      var hi34 = Avx2.UnpackHigh(v3, v4);
+      var hi56 = Avx2.UnpackHigh(v5, v6);
+      var hi78 = Avx2.UnpackHigh(v7, v8);
+
+      v1 = lo12; v2 = lo34; v3 = lo56; v4 = lo78; v5 = hi12; v6 = hi34; v7 = hi56; v8 = hi78;
+
+      lo12 = Avx2.UnpackLow(v1.AsUInt32(), v2.AsUInt32()).AsUInt16(); // a1,a2,a3,a4,b1,...,i1,i2,...,j4
+      lo34 = Avx2.UnpackLow(v3.AsUInt32(), v4.AsUInt32()).AsUInt16(); // a5,a6,a7,a8,b5,...,i1,i2,...,j8
+      lo56 = Avx2.UnpackLow(v5.AsUInt32(), v6.AsUInt32()).AsUInt16(); // c1,c2,...k4
+      lo78 = Avx2.UnpackLow(v7.AsUInt32(), v8.AsUInt32()).AsUInt16();
+      hi12 = Avx2.UnpackHigh(v1.AsUInt32(), v2.AsUInt32()).AsUInt16();
+      hi34 = Avx2.UnpackHigh(v3.AsUInt32(), v4.AsUInt32()).AsUInt16();
+      hi56 = Avx2.UnpackHigh(v5.AsUInt32(), v6.AsUInt32()).AsUInt16();
+      hi78 = Avx2.UnpackHigh(v7.AsUInt32(), v8.AsUInt32()).AsUInt16(); // g5,g6,g7,g8,h5,...,p8
+
+      v1 = lo12; v2 = lo34; v3 = hi12; v4 = hi34; v5 = lo56; v6 = lo78; v7 = hi56; v8 = hi78;
+
+      lo12 = Avx2.UnpackLow(v1.AsUInt64(), v2.AsUInt64()).AsUInt16(); // a1,a2,a3,a4,a5,a6,a7,8,i1,...,i8
+      lo34 = Avx2.UnpackLow(v3.AsUInt64(), v4.AsUInt64()).AsUInt16(); // b1,b2,...,k8
+      lo56 = Avx2.UnpackLow(v5.AsUInt64(), v6.AsUInt64()).AsUInt16();
+      lo78 = Avx2.UnpackLow(v7.AsUInt64(), v8.AsUInt64()).AsUInt16();
+      hi12 = Avx2.UnpackHigh(v1.AsUInt64(), v2.AsUInt64()).AsUInt16();
+      hi34 = Avx2.UnpackHigh(v3.AsUInt64(), v4.AsUInt64()).AsUInt16();
+      hi56 = Avx2.UnpackHigh(v5.AsUInt64(), v6.AsUInt64()).AsUInt16();
+      hi78 = Avx2.UnpackHigh(v7.AsUInt64(), v8.AsUInt64()).AsUInt16(); // h1,h2,...,p8
+
+      v1 = lo12; v2 = hi12; v3 = lo34; v4 = hi34; v5 = lo56; v6 = hi56; v7 = lo78; v8 = hi78;
+
+      Sse2.Store(p_dest, v1.GetLower()); p_dest += 16;
+      Sse2.Store(p_dest, v2.GetLower()); p_dest += 16;
+      Sse2.Store(p_dest, v3.GetLower()); p_dest += 16;
+      Sse2.Store(p_dest, v4.GetLower()); p_dest += 16;
+      Sse2.Store(p_dest, v5.GetLower()); p_dest += 16;
+      Sse2.Store(p_dest, v6.GetLower()); p_dest += 16;
+      Sse2.Store(p_dest, v7.GetLower()); p_dest += 16;
+      Sse2.Store(p_dest, v8.GetLower()); p_dest += 16;
+      Sse2.Store(p_dest, v1.GetUpper()); p_dest += 16;
+      Sse2.Store(p_dest, v2.GetUpper()); p_dest += 16;
+      Sse2.Store(p_dest, v3.GetUpper()); p_dest += 16;
+      Sse2.Store(p_dest, v4.GetUpper()); p_dest += 16;
+      Sse2.Store(p_dest, v5.GetUpper()); p_dest += 16;
+      Sse2.Store(p_dest, v6.GetUpper()); p_dest += 16;
+      Sse2.Store(p_dest, v7.GetUpper()); p_dest += 16;
+      Sse2.Store(p_dest, v8.GetUpper());
     }
 
     static void Solve16Sudokus(Span<ushort> data, Span<ushort> puzzles, Span<ushort> solutions)
