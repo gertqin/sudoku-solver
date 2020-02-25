@@ -1,19 +1,19 @@
 ﻿#define CHECK_SOLUTION
+//#define RUN_MULTIPLE_LOOPS
 
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.IO.MemoryMappedFiles;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
-using System.Threading;
 
 namespace SudokuSolver
 {
   class Solver2
   {
+    const int MULTIPLE_RUN_COUNT = 10;
+
     const int SUDOKU_CELL_COUNT = 81;
     const int ROW_OFFSET = SUDOKU_CELL_COUNT << 4;
     const int COL_OFFSET = ROW_OFFSET + (9 << 4);
@@ -44,8 +44,13 @@ namespace SudokuSolver
 
       timer.Stop();
 
+      var sudokuCount = 1000000;
+#if RUN_MULTIPLE_LOOPS
+      sudokuCount *= MULTIPLE_RUN_COUNT;
+#endif
+
       Console.WriteLine($"Time to read input: {readInputMs}ms");
-      Console.WriteLine($"Time to solve 1,000,000 sudokus: {timer.ElapsedMilliseconds}ms");
+      Console.WriteLine($"Time to solve {sudokuCount.ToString("N0")} sudokus: {timer.ElapsedMilliseconds}ms");
       Console.WriteLine($"Failed sudokus: {failed}");
     }
 
@@ -53,10 +58,15 @@ namespace SudokuSolver
     {
       GlobalSetup();
 
-      for (int i = 0; i < bytes.Length; i += BYTES_FOR_16_SUDOKUS)
+#if RUN_MULTIPLE_LOOPS
+      for (int n = 0; n < MULTIPLE_RUN_COUNT; n++)
+#endif
       {
-        var sudokus_16 = new Span<byte>(bytes, i, BYTES_FOR_16_SUDOKUS);
-        AllocateAndSolve(sudokus_16);
+        for (int i = 0; i < bytes.Length; i += BYTES_FOR_16_SUDOKUS)
+        {
+          var sudokus_16 = new Span<byte>(bytes, i, BYTES_FOR_16_SUDOKUS);
+          AllocateAndSolve(sudokus_16);
+        }
       }
     }
 
@@ -165,29 +175,29 @@ namespace SudokuSolver
 
       v1 = lo12; v2 = hi12; v3 = lo34; v4 = hi34; v5 = lo56; v6 = hi56; v7 = lo78; v8 = hi78;
 
-      Sse2.Store(p_dest, v1.GetLower()); p_dest += 16;
-      Sse2.Store(p_dest, v2.GetLower()); p_dest += 16;
-      Sse2.Store(p_dest, v3.GetLower()); p_dest += 16;
-      Sse2.Store(p_dest, v4.GetLower()); p_dest += 16;
-      Sse2.Store(p_dest, v5.GetLower()); p_dest += 16;
-      Sse2.Store(p_dest, v6.GetLower()); p_dest += 16;
-      Sse2.Store(p_dest, v7.GetLower()); p_dest += 16;
-      Sse2.Store(p_dest, v8.GetLower()); p_dest += 16;
-      Sse2.Store(p_dest, v1.GetUpper()); p_dest += 16;
-      Sse2.Store(p_dest, v2.GetUpper()); p_dest += 16;
-      Sse2.Store(p_dest, v3.GetUpper()); p_dest += 16;
-      Sse2.Store(p_dest, v4.GetUpper()); p_dest += 16;
-      Sse2.Store(p_dest, v5.GetUpper()); p_dest += 16;
-      Sse2.Store(p_dest, v6.GetUpper()); p_dest += 16;
-      Sse2.Store(p_dest, v7.GetUpper()); p_dest += 16;
-      Sse2.Store(p_dest, v8.GetUpper());
+      Sse2.Store(p_dest, v1.GetLower());
+      Sse2.Store(p_dest + (1 << 4), v2.GetLower());
+      Sse2.Store(p_dest + (2 << 4), v3.GetLower());
+      Sse2.Store(p_dest + (3 << 4), v4.GetLower());
+      Sse2.Store(p_dest + (4 << 4), v5.GetLower());
+      Sse2.Store(p_dest + (5 << 4), v6.GetLower());
+      Sse2.Store(p_dest + (6 << 4), v7.GetLower());
+      Sse2.Store(p_dest + (7 << 4), v8.GetLower());
+      Sse2.Store(p_dest + (8 << 4), v1.GetUpper());
+      Sse2.Store(p_dest + (9 << 4), v2.GetUpper());
+      Sse2.Store(p_dest + (10 << 4), v3.GetUpper());
+      Sse2.Store(p_dest + (11 << 4), v4.GetUpper());
+      Sse2.Store(p_dest + (12 << 4), v5.GetUpper());
+      Sse2.Store(p_dest + (13 << 4), v6.GetUpper());
+      Sse2.Store(p_dest + (14 << 4), v7.GetUpper());
+      Sse2.Store(p_dest + (15 << 4), v8.GetUpper());
     }
 
     static void Solve16Sudokus(Span<ushort> data, Span<ushort> puzzles, Span<ushort> solutions)
     {
       SetupStep(data, puzzles);
 
-      SolveStep(data, iterations: 5);
+      SolveStep(data, iterations: 6);
 
       SolveRemainingStep(data);
 
@@ -248,51 +258,57 @@ namespace SudokuSolver
         {
           do
           {
-            int r = 0, c = 0;
-            for (int i = 0; i != SUDOKU_CELL_COUNT; ++i)
+            ushort* p_puzzle = &p_puzzles[0], p_row = &p_rows[0], p_col = &p_cols[0], p_box = &p_boxs[0];
+            for (int i = 0; i < 9; i++)
             {
-              var p_puzzle = &p_puzzles[i << 4];
-
-              if (Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(p_puzzle), Vector256<ushort>.Zero).AsByte()) != 0)
-              {
-                ushort* p_row = &p_rows[r << 4],
-                  p_col = &p_cols[c << 4],
-                  p_box = &p_boxs[cell2box[i]];
-
-                Vector256<ushort> bits = Avx2.Or(
-                  Avx2.And(Avx2.And(Avx.LoadVector256(p_row), Avx.LoadVector256(p_col)), Avx.LoadVector256(p_box)),
-                  Avx.LoadVector256(p_puzzle)
-                );
-
-                var mask = Avx2.CompareGreaterThan(Vector256.Create((short)3), bits.AsInt16()).AsUInt16();
-                var po2 = Vector256.Create((ushort)4);
-                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2)); po2 = Avx2.ShiftLeftLogical(po2, 1);
-                mask = Avx2.Or(mask, Avx2.CompareEqual(bits, po2));
-
-                if (Avx2.MoveMask(mask.AsByte()) != 0)
-                {
-                  bits = Avx2.And(mask, bits);
-                  Avx.Store(p_puzzle, Avx2.Or(bits, Avx.LoadVector256(p_puzzle)));
-
-                  Avx.Store(p_row, Avx2.AndNot(bits, Avx.LoadVector256(p_row)));
-                  Avx.Store(p_col, Avx2.AndNot(bits, Avx.LoadVector256(p_col)));
-                  Avx.Store(p_box, Avx2.AndNot(bits, Avx.LoadVector256(p_box)));
-                }
-              }
-
-              ++c;
-              if (c == 9)
-              {
-                c = 0;
-                ++r;
-              }
+              if (i == 3 || i == 6)
+                p_box += 3 << 4;
+              FillRow(p_puzzle, p_row, p_col, p_box);
+              p_puzzle += 9 << 4;
+              p_row += 16;
             }
           } while (--iterations > 0);
+        }
+      }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static unsafe void FillRow(ushort* p_puzzle, ushort* p_row, ushort* p_col, ushort* p_box)
+    {
+      var row = Avx.LoadVector256(p_row);
+      for (int i = 0; i < 3; i++)
+      {
+        var box = Avx.LoadVector256(p_box);
+        var rowAndBox = Avx2.And(row, box);
+        FillCell(p_puzzle, p_row, p_col, p_box, rowAndBox); p_col += 16; p_puzzle += 16;
+        FillCell(p_puzzle, p_row, p_col, p_box, rowAndBox); p_col += 16; p_puzzle += 16;
+        FillCell(p_puzzle, p_row, p_col, p_box, rowAndBox); p_col += 16; p_puzzle += 16;
+        p_box += 16;
+      }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static unsafe void FillCell(ushort* p_puzzle, ushort* p_row, ushort* p_col, ushort* p_box, Vector256<ushort> rowAndBox)
+    {
+      var zeros = Vector256<ushort>.Zero;
+      if (Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(p_puzzle), zeros).AsByte()) != 0)
+      {
+        Vector256<ushort> bits = Avx2.Or(
+          Avx2.And(rowAndBox, Avx.LoadVector256(p_col)),
+          Avx.LoadVector256(p_puzzle)
+        );
+
+        var bitsWithoutLSB = Avx2.And(bits, Avx2.Subtract(bits, Vector256.Create((ushort)1)));
+        var mask = Avx2.CompareEqual(bitsWithoutLSB, zeros);
+
+        if (Avx2.MoveMask(mask.AsByte()) != 0)
+        {
+          bits = Avx2.And(mask, bits);
+          Avx.Store(p_puzzle, Avx2.Or(bits, Avx.LoadVector256(p_puzzle)));
+
+          Avx.Store(p_row, Avx2.AndNot(bits, Avx.LoadVector256(p_row)));
+          Avx.Store(p_col, Avx2.AndNot(bits, Avx.LoadVector256(p_col)));
+          Avx.Store(p_box, Avx2.AndNot(bits, Avx.LoadVector256(p_box)));
         }
       }
     }
