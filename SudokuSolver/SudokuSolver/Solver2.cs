@@ -85,15 +85,15 @@ namespace SudokuSolver
       // allocate data in its own function should avoid zeroing
       Span<ushort> data = stackalloc ushort[DATA_LENGTH];
 
-      Span<ushort> solutions = stackalloc ushort[SUDOKU_CELL_COUNT << 4];
-
       TransposeSudokus(importSudokus, data);
 
-#if CHECK_SOLUTION
-      TransposeSudokus(importSudokus.Slice(SUDOKU_CELL_COUNT + 1), solutions);
-#endif
+      Solve16Sudokus(data);
 
-      Solve16Sudokus(data, solutions);
+#if CHECK_SOLUTION
+      Span<ushort> solutions = stackalloc ushort[SUDOKU_CELL_COUNT << 4];
+      TransposeSudokus(importSudokus.Slice(SUDOKU_CELL_COUNT + 1), solutions);
+      CheckSolutions(data, solutions);
+#endif
     }
 
     // either puzzles or solutions
@@ -216,17 +216,13 @@ namespace SudokuSolver
       return cellsInBase2;
     }
 
-    static void Solve16Sudokus(Span<ushort> data, Span<ushort> solutions)
+    static void Solve16Sudokus(Span<ushort> data)
     {
       SetupStep(data);
 
       SolveStep(data, iterations: 6);
 
       SolveRemainingStep(data);
-
-#if CHECK_SOLUTION
-      CheckSolutions(data, solutions);
-#endif
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
