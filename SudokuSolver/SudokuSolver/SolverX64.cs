@@ -7,7 +7,7 @@ using System.Text;
 
 namespace SudokuSolver
 {
-  class Solver1
+  class SolverX64
   {
     const int PARALLEL_COUNT = 7;
     const int PUZZLE_MASK_OFFSET = 81;
@@ -37,8 +37,7 @@ namespace SudokuSolver
     static long simpleSolveTime = 0;
     static long checkSolutionTime = 0;
 
-
-    public static void Solve()
+    public static void Run()
     {
       string[] sudokus = System.IO.File.ReadAllLines("../../../../../sudoku.csv");
 

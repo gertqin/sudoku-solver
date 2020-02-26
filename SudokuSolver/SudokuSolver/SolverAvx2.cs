@@ -10,7 +10,7 @@ using System.Runtime.Intrinsics.X86;
 
 namespace SudokuSolver
 {
-  class Solver2
+  class SolverAvx2
   {
     const int MULTIPLE_RUN_COUNT = 10;
 
@@ -257,19 +257,6 @@ namespace SudokuSolver
         }
       }
     }
-    //[MethodImpl(MethodImplOptions.AggressiveInlining)]
-    //static unsafe void SetupCell(ushort* p_puzzleChars, Vector256<ushort> vectorCharOffset, Vector256<uint> vectorOnes)
-    //{
-    //    var cellsInBase10 = Avx2.Subtract(Avx.LoadVector256(p_puzzleChars, vectorCharOffset);
-    //    var cellsInBase2 = ConvertBase10ToBase2(cellsInBase10, vectorOnes);
-
-    //    Avx.Store(&p_puzzles[i << 4], cellsInBase2);
-
-    //    ushort* p_row = &p_rows[r << 4], p_col = &p_cols[c << 4], p_box = &p_boxs[cell2box[i]];
-    //    Avx.Store(p_row, Avx2.AndNot(cellsInBase2, Avx.LoadVector256(p_row)));
-    //    Avx.Store(p_col, Avx2.AndNot(cellsInBase2, Avx.LoadVector256(p_col)));
-    //    Avx.Store(p_box, Avx2.AndNot(cellsInBase2, Avx.LoadVector256(p_box)));
-    //}
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static unsafe void SolveStep(Span<ushort> data, int iterations)
@@ -295,6 +282,9 @@ namespace SudokuSolver
     static unsafe void FillRow(ushort* p_puzzle, ushort* p_row, ushort* p_col, ushort* p_box)
     {
       var row = Avx.LoadVector256(p_row);
+      if (Avx2.MoveMask(Avx2.CompareGreaterThan(row.AsInt16(), Vector256<short>.Zero).AsByte()) == 0)
+        return;
+
       for (int i = 0; i < 3; i++)
       {
         var box = Avx.LoadVector256(p_box);
@@ -335,11 +325,14 @@ namespace SudokuSolver
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static unsafe void SolveRemainingStep(Span<ushort> data)
     {
-      fixed (ushort* p_puzzles = &data[0])
+      fixed (ushort* p_puzzles = &data[0], p_rows = &data[ROW_OFFSET])
       {
-        for (int i = 0; i != ROW_OFFSET; i += 16)
+        var zeros = Vector256<short>.Zero;
+
+        int maxI = 9 << 4;
+        for (int i = 0; i < maxI; i += 16)
         {
-          var mask = Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(&p_puzzles[i]), Vector256<ushort>.Zero).AsByte());
+          var mask = Avx2.MoveMask(Avx2.CompareGreaterThan(Avx.LoadVector256(&p_rows[i]).AsInt16(), zeros).AsByte());
           if (mask != 0)
           {
             for (int j = 0; j != 16; ++j)
