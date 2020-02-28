@@ -1,9 +1,4 @@
-﻿#define CHECK_SOLUTION
-//#define RUN_MULTIPLE_LOOPS
-
-using System;
-using System.Diagnostics;
-using System.IO;
+﻿using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
@@ -12,8 +7,6 @@ namespace SudokuSolver
 {
   class SolverAvx2
   {
-    const int MULTIPLE_RUN_COUNT = 10;
-
     const int SUDOKU_CELL_COUNT = 81;
     const int ROW_OFFSET = SUDOKU_CELL_COUNT << 4;
     const int COL_OFFSET = ROW_OFFSET + (9 << 4);
@@ -27,50 +20,9 @@ namespace SudokuSolver
 
     static int[] cell2box = new int[SUDOKU_CELL_COUNT];
 
-    static int failed = 0;
+    public static int FailedCount = 0;
 
-    public static void Run()
-    {
-      long readInputMs = 0;
-      var timer = Stopwatch.StartNew();
-
-      var bytes = File.ReadAllBytes("../../../../../sudoku.csv");
-
-      timer.Stop();
-      readInputMs = timer.ElapsedMilliseconds;
-      timer.Restart();
-
-      SolveAllSudokus(bytes);
-
-      timer.Stop();
-
-      var sudokuCount = 1000000;
-#if RUN_MULTIPLE_LOOPS
-      sudokuCount *= MULTIPLE_RUN_COUNT;
-#endif
-
-      Console.WriteLine($"Time to read input: {readInputMs}ms");
-      Console.WriteLine($"Time to solve {sudokuCount.ToString("N0")} sudokus: {timer.ElapsedMilliseconds}ms");
-      Console.WriteLine($"Failed sudokus: {failed}");
-    }
-
-    static void SolveAllSudokus(byte[] bytes)
-    {
-      GlobalSetup();
-
-#if RUN_MULTIPLE_LOOPS
-      for (int n = 0; n < MULTIPLE_RUN_COUNT; n++)
-#endif
-      {
-        for (int i = 0; i < bytes.Length; i += BYTES_FOR_16_SUDOKUS)
-        {
-          var sudokus_16 = new Span<byte>(bytes, i, BYTES_FOR_16_SUDOKUS);
-          AllocateAndSolve(sudokus_16);
-        }
-      }
-    }
-
-    static void GlobalSetup()
+    public static void GlobalSetup()
     {
       for (int i = 0; i < SUDOKU_CELL_COUNT; i++)
       {
@@ -79,8 +31,16 @@ namespace SudokuSolver
         cell2box[i] = ((row / 3 * 3) + (col / 3)) << 4;
       }
     }
+    public static void Run(byte[] bytes, bool checkSolutions)
+    {
+      for (int i = 0; i < bytes.Length; i += BYTES_FOR_16_SUDOKUS)
+      {
+        var sudokus_16 = new Span<byte>(bytes, i, BYTES_FOR_16_SUDOKUS);
+        AllocateAndSolve(sudokus_16, checkSolutions);
+      }
+    }
 
-    static void AllocateAndSolve(Span<byte> importSudokus)
+    static void AllocateAndSolve(Span<byte> importSudokus, bool checkSolutions)
     {
       // allocate data in its own function should avoid zeroing
       Span<ushort> data = stackalloc ushort[DATA_LENGTH];
@@ -89,11 +49,12 @@ namespace SudokuSolver
 
       Solve16Sudokus(data);
 
-#if CHECK_SOLUTION
-      Span<ushort> solutions = stackalloc ushort[SUDOKU_CELL_COUNT << 4];
-      TransposeSudokus(importSudokus.Slice(SUDOKU_CELL_COUNT + 1), solutions);
-      CheckSolutions(data, solutions);
-#endif
+      if (checkSolutions)
+      {
+        Span<ushort> solutions = stackalloc ushort[SUDOKU_CELL_COUNT << 4];
+        TransposeSudokus(importSudokus.Slice(SUDOKU_CELL_COUNT + 1), solutions);
+        CheckSolutions(data, solutions);
+      }
     }
 
     // either puzzles or solutions
@@ -404,11 +365,8 @@ namespace SudokuSolver
                 Span<ushort> dataCopy = stackalloc ushort[DATA_LENGTH];
                 data.CopyTo(dataCopy);
 
-                uint bit1 = 1;
-                while ((bit1 & bits) == 0)
-                  bit1 <<= 1;
-
                 uint bit2 = Bmi1.ResetLowestSetBit(bits);
+                uint bit1 = bits ^ bit2;
 
                 *p_puzzle = (ushort)bit1;
                 *p_row = (ushort)(*p_row & ~bit1);
@@ -452,7 +410,7 @@ namespace SudokuSolver
         {
           if ((uint)Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(&p_puzzles[i << 4]), Avx.LoadVector256(&p_solution[i << 4])).AsByte()) != 0xFFFFFFFF)
           {
-            failed++;
+            ++FailedCount;
             break;
           }
         }
