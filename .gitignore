@@ -3,3 +3,4 @@ sudoku.csv
 bin
 obj
 .vs
+*.s
