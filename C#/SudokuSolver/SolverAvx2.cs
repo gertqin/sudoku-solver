@@ -192,29 +192,40 @@ namespace SudokuSolver
       fixed (ushort* p_puzzles = &data[0], p_rows = &data[ROW_OFFSET], p_cols = &data[COL_OFFSET], p_boxs = &data[BOX_OFFSET])
       {
         int filterMax = 9 << 4;
-        for (int i = 0; i < filterMax; i++)
+        int i, r, c;
+        for (i = 0; i < filterMax; i++)
         {
           p_rows[i] = NINE_BITS_MASK;
           p_cols[i] = NINE_BITS_MASK;
           p_boxs[i] = NINE_BITS_MASK;
         }
 
-        int r = 0, c = 0;
-        for (int i = 0; i < SUDOKU_CELL_COUNT; i++)
+        i = 0;
+        for (r = 0; r < 9; ++r)
         {
-          var puzzleCells = Avx.LoadVector256(&p_puzzles[i << 4]);
+          ushort* p_row = &p_rows[r << 4], p_box = &p_boxs[cell2box[i]];
+          var rVec = Avx.LoadVector256(p_row);
+          var bVec = Avx.LoadVector256(p_box);
 
-          ushort* p_row = &p_rows[r << 4], p_col = &p_cols[c << 4], p_box = &p_boxs[cell2box[i]];
-          Avx.Store(p_row, Avx2.AndNot(puzzleCells, Avx.LoadVector256(p_row)));
-          Avx.Store(p_col, Avx2.AndNot(puzzleCells, Avx.LoadVector256(p_col)));
-          Avx.Store(p_box, Avx2.AndNot(puzzleCells, Avx.LoadVector256(p_box)));
+          for (c = 0; c < 9; ++c) {
+            ushort* p_col = &p_cols[c << 4];
+            var pVec = Avx.LoadVector256(&p_puzzles[i << 4]);
 
-          ++c;
-          if (c == 9)
-          {
-            c = 0;
-            ++r;
+            rVec = Avx2.AndNot(pVec, rVec);
+            bVec = Avx2.AndNot(pVec, bVec);
+            Avx.Store(p_col, Avx2.AndNot(pVec, Avx.LoadVector256(p_col)));
+
+            ++i;
+            if (c == 2 || c == 5)
+            {
+              Avx.Store(p_box, bVec);
+              p_box += 16;
+              bVec = Avx.LoadVector256(p_box);
+            }
           }
+
+          Avx.Store(p_row, rVec);
+          Avx.Store(p_box, bVec);
         }
       }
     }
@@ -224,62 +235,68 @@ namespace SudokuSolver
     {
       fixed (ushort* p_puzzles = &data[0], p_rows = &data[ROW_OFFSET], p_cols = &data[COL_OFFSET], p_boxs = &data[BOX_OFFSET])
       {
+        int r, c, i;
+        var zeroVec = Vector256<ushort>.Zero;
+        var oneVec = Vector256.Create((ushort)1);
         do
         {
-          ushort* p_puzzle = &p_puzzles[0], p_row = &p_rows[0], p_col = &p_cols[0], p_box = &p_boxs[0];
-          for (int i = 0; i < 9; i++)
+          i = 0;
+          for (r = 0; r < 9; ++r)
           {
-            if (i == 3 || i == 6)
-              p_box += 3 << 4;
-            FillRow(p_puzzle, p_row, p_col, p_box);
-            p_puzzle += 9 << 4;
-            p_row += 16;
+            ushort* p_row = &p_rows[r << 4];
+            var rVec = Avx.LoadVector256(p_row);
+
+            if (Avx2.MoveMask(Avx2.CompareGreaterThan(rVec.AsInt16(), zeroVec.AsInt16()).AsByte()) == 0)
+            {
+              i += 9;
+              continue;
+            }
+
+            ushort* p_box = &p_boxs[cell2box[i]];
+            var bVec = Avx.LoadVector256(p_box);
+
+            for (c = 0; c < 9; ++c)
+            {
+              ushort* p_puzzle = &p_puzzles[i << 4];
+              var pVec = Avx.LoadVector256(p_puzzle);
+
+              if (Avx2.MoveMask(Avx2.CompareEqual(pVec, zeroVec).AsByte()) != 0)
+              {
+                ushort* p_col = &p_cols[c << 4];
+                var cVec = Avx.LoadVector256(p_col);
+
+                Vector256<ushort> bits = Avx2.Or(
+                  Avx2.And(Avx2.And(rVec, bVec), cVec),
+                  Avx.LoadVector256(p_puzzle)
+                );
+
+                var bitsWithoutLSB = Avx2.And(bits, Avx2.Subtract(bits, oneVec));
+                var mask = Avx2.CompareEqual(bitsWithoutLSB, zeroVec);
+
+                if (Avx2.MoveMask(mask.AsByte()) != 0)
+                {
+                  bits = Avx2.And(mask, bits);
+                  Avx.Store(p_puzzle, Avx2.Or(bits, pVec));
+
+                  rVec = Avx2.AndNot(bits, rVec);
+                  bVec = Avx2.AndNot(bits, bVec);
+                  Avx.Store(p_col, Avx2.AndNot(bits, cVec));
+                }
+              }
+
+              ++i;
+              if (c == 2 || c == 5)
+              {
+                Avx.Store(p_box, bVec);
+                p_box += 16;
+                bVec = Avx.LoadVector256(p_box);
+              }
+            }
+
+            Avx.Store(p_row, rVec);
+            Avx.Store(p_box, bVec);
           }
         } while (--iterations > 0);
-      }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static unsafe void FillRow(ushort* p_puzzle, ushort* p_row, ushort* p_col, ushort* p_box)
-    {
-      var row = Avx.LoadVector256(p_row);
-      if (Avx2.MoveMask(Avx2.CompareGreaterThan(row.AsInt16(), Vector256<short>.Zero).AsByte()) == 0)
-        return;
-
-      for (int i = 0; i < 3; i++)
-      {
-        var box = Avx.LoadVector256(p_box);
-        var rowAndBox = Avx2.And(row, box);
-        FillCell(p_puzzle, p_row, p_col, p_box, rowAndBox); p_col += 16; p_puzzle += 16;
-        FillCell(p_puzzle, p_row, p_col, p_box, rowAndBox); p_col += 16; p_puzzle += 16;
-        FillCell(p_puzzle, p_row, p_col, p_box, rowAndBox); p_col += 16; p_puzzle += 16;
-        p_box += 16;
-      }
-    }
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    static unsafe void FillCell(ushort* p_puzzle, ushort* p_row, ushort* p_col, ushort* p_box, Vector256<ushort> rowAndBox)
-    {
-      var zeros = Vector256<ushort>.Zero;
-      if (Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(p_puzzle), zeros).AsByte()) != 0)
-      {
-        Vector256<ushort> bits = Avx2.Or(
-          Avx2.And(rowAndBox, Avx.LoadVector256(p_col)),
-          Avx.LoadVector256(p_puzzle)
-        );
-
-        var bitsWithoutLSB = Avx2.And(bits, Avx2.Subtract(bits, Vector256.Create((ushort)1)));
-        var mask = Avx2.CompareEqual(bitsWithoutLSB, zeros);
-
-        if (Avx2.MoveMask(mask.AsByte()) != 0)
-        {
-          bits = Avx2.And(mask, bits);
-          Avx.Store(p_puzzle, Avx2.Or(bits, Avx.LoadVector256(p_puzzle)));
-
-          Avx.Store(p_row, Avx2.AndNot(bits, Avx.LoadVector256(p_row)));
-          Avx.Store(p_col, Avx2.AndNot(bits, Avx.LoadVector256(p_col)));
-          Avx.Store(p_box, Avx2.AndNot(bits, Avx.LoadVector256(p_box)));
-        }
       }
     }
 
