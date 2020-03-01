@@ -246,7 +246,7 @@ namespace SudokuSolver
             ushort* p_row = &p_rows[r << 4];
             var rVec = Avx.LoadVector256(p_row);
 
-            if (Avx2.MoveMask(Avx2.CompareGreaterThan(rVec.AsInt16(), zeroVec.AsInt16()).AsByte()) == 0)
+            if ((uint)Avx2.MoveMask(Avx2.CompareEqual(rVec, zeroVec).AsByte()) == 0xFFFFFFFF)
             {
               i += 9;
               continue;
@@ -420,12 +420,13 @@ namespace SudokuSolver
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static unsafe void CheckSolutions(Span<ushort> data, Span<ushort> solutions)
     {
-      fixed (ushort* p_puzzles = &data[0], p_solution = &solutions[0])
+      fixed (ushort* p_puzzle = &data[0], p_solution = &solutions[0])
       {
         // check solution
-        for (int i = 0; i < SUDOKU_CELL_COUNT; i++)
+        int maxI = SUDOKU_CELL_COUNT << 4;
+        for (int i = 0; i < maxI; i+=16)
         {
-          if ((uint)Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(&p_puzzles[i << 4]), Avx.LoadVector256(&p_solution[i << 4])).AsByte()) != 0xFFFFFFFF)
+          if ((uint)Avx2.MoveMask(Avx2.CompareEqual(Avx.LoadVector256(&p_puzzle[i]), Avx.LoadVector256(&p_solution[i])).AsByte()) != 0xFFFFFFFF)
           {
             ++FailedCount;
             break;
