@@ -238,13 +238,17 @@ namespace SudokuSolver
         int r, c, i;
         var zeroVec = Vector256<ushort>.Zero;
         var oneVec = Vector256.Create((ushort)1);
+
+        Vector256<ushort> rVec, bVec, cVec, pVec, bits, bitsWithoutLSB, mask;
+        ushort* p_row, p_box, p_col, p_puzzle;
+
         do
         {
           i = 0;
           for (r = 0; r < 9; ++r)
           {
-            ushort* p_row = &p_rows[r << 4];
-            var rVec = Avx.LoadVector256(p_row);
+            p_row = &p_rows[r << 4];
+            rVec = Avx.LoadVector256(p_row);
 
             if ((uint)Avx2.MoveMask(Avx2.CompareEqual(rVec, zeroVec).AsByte()) == 0xFFFFFFFF)
             {
@@ -252,26 +256,26 @@ namespace SudokuSolver
               continue;
             }
 
-            ushort* p_box = &p_boxs[cell2box[i]];
-            var bVec = Avx.LoadVector256(p_box);
+            p_box = &p_boxs[cell2box[i]];
+            bVec = Avx.LoadVector256(p_box);
 
             for (c = 0; c < 9; ++c)
             {
-              ushort* p_puzzle = &p_puzzles[i << 4];
-              var pVec = Avx.LoadVector256(p_puzzle);
+              p_puzzle = &p_puzzles[i << 4];
+              pVec = Avx.LoadVector256(p_puzzle);
 
               if (Avx2.MoveMask(Avx2.CompareEqual(pVec, zeroVec).AsByte()) != 0)
               {
-                ushort* p_col = &p_cols[c << 4];
-                var cVec = Avx.LoadVector256(p_col);
+                p_col = &p_cols[c << 4];
+                cVec = Avx.LoadVector256(p_col);
 
-                Vector256<ushort> bits = Avx2.Or(
+                bits = Avx2.Or(
                   Avx2.And(Avx2.And(rVec, bVec), cVec),
-                  Avx.LoadVector256(p_puzzle)
+                  pVec
                 );
 
-                var bitsWithoutLSB = Avx2.And(bits, Avx2.Subtract(bits, oneVec));
-                var mask = Avx2.CompareEqual(bitsWithoutLSB, zeroVec);
+                bitsWithoutLSB = Avx2.And(bits, Avx2.Subtract(bits, oneVec));
+                mask = Avx2.CompareEqual(bitsWithoutLSB, zeroVec);
 
                 if (Avx2.MoveMask(mask.AsByte()) != 0)
                 {
