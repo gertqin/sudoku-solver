@@ -144,21 +144,21 @@ namespace SudokuSolver
       v8 = ConvertCharsToBase2(v8, vectorCharOffset, vectorOnes);
 
       Sse2.Store(p_dest, v1.GetLower());
-      Sse2.Store(p_dest + (1 << 4), v2.GetLower());
-      Sse2.Store(p_dest + (2 << 4), v3.GetLower());
-      Sse2.Store(p_dest + (3 << 4), v4.GetLower());
-      Sse2.Store(p_dest + (4 << 4), v5.GetLower());
-      Sse2.Store(p_dest + (5 << 4), v6.GetLower());
-      Sse2.Store(p_dest + (6 << 4), v7.GetLower());
-      Sse2.Store(p_dest + (7 << 4), v8.GetLower());
-      Sse2.Store(p_dest + (8 << 4), v1.GetUpper());
-      Sse2.Store(p_dest + (9 << 4), v2.GetUpper());
-      Sse2.Store(p_dest + (10 << 4), v3.GetUpper());
-      Sse2.Store(p_dest + (11 << 4), v4.GetUpper());
-      Sse2.Store(p_dest + (12 << 4), v5.GetUpper());
-      Sse2.Store(p_dest + (13 << 4), v6.GetUpper());
-      Sse2.Store(p_dest + (14 << 4), v7.GetUpper());
-      Sse2.Store(p_dest + (15 << 4), v8.GetUpper());
+      Sse2.Store(p_dest + 0x10, v2.GetLower());
+      Sse2.Store(p_dest + 0x20, v3.GetLower());
+      Sse2.Store(p_dest + 0x30, v4.GetLower());
+      Sse2.Store(p_dest + 0x40, v5.GetLower());
+      Sse2.Store(p_dest + 0x50, v6.GetLower());
+      Sse2.Store(p_dest + 0x60, v7.GetLower());
+      Sse2.Store(p_dest + 0x70, v8.GetLower());
+      Sse2.Store(p_dest + 0x80, v1.GetUpper());
+      Sse2.Store(p_dest + 0x90, v2.GetUpper());
+      Sse2.Store(p_dest + 0xA0, v3.GetUpper());
+      Sse2.Store(p_dest + 0xB0, v4.GetUpper());
+      Sse2.Store(p_dest + 0xC0, v5.GetUpper());
+      Sse2.Store(p_dest + 0xD0, v6.GetUpper());
+      Sse2.Store(p_dest + 0xE0, v7.GetUpper());
+      Sse2.Store(p_dest + 0xF0, v8.GetUpper());
     }
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static Vector256<ushort> ConvertCharsToBase2(Vector256<ushort> cellsAsChars, Vector256<ushort> vectorCharOffset, Vector256<uint> vectorOnes)
