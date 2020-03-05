@@ -9,9 +9,9 @@ namespace SudokuSolver
   {
     const int SUDOKU_CELL_COUNT = 81;
     const int ROW_OFFSET = SUDOKU_CELL_COUNT << 4;
-    const int COL_OFFSET = ROW_OFFSET + (9 << 4);
-    const int BOX_OFFSET = COL_OFFSET + (9 << 4);
-    const int DATA_LENGTH = BOX_OFFSET + (9 << 4);
+    const int BOX_OFFSET = ROW_OFFSET + (9 << 4);
+    const int COL_OFFSET = BOX_OFFSET + (9 << 4);
+    const int DATA_LENGTH = COL_OFFSET + (9 << 4);
 
     const int BYTES_PER_SUDOKU = (SUDOKU_CELL_COUNT + 1) * 2; // 82 because of ',' and '\n'
     const int BYTES_FOR_16_SUDOKUS = BYTES_PER_SUDOKU << 4;

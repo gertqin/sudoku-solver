@@ -3,7 +3,7 @@
 #include "stdio.h"
 #include "time.h"
 
-#define TEST
+// #define TEST
 #define CHECK_SOLUTION
 
 #define SUDOKU_COUNT 1000000
@@ -21,21 +21,24 @@
 #define ROW_OFFSET 1296  // 81 << 4
 #define BOX_OFFSET 1440  // + 9 << 4
 #define COL_OFFSET 1584  // + 9 << 4
-#define DATA_LENGTH 1782 // + 9 << 4
+#define DATA_LENGTH 1728 // + 9 << 4
 
-// #region function defines
+#pragma region function declerations
 static void run(const uint8_t *bytes);
 static void solve16sudokus(const uint8_t *sudokus, uint16_t *data);
 static void transformSudokus(const uint8_t *sudokus, uint16_t *data);
 static void setupStep(uint16_t *data, int *r2b);
+
+static void testTransformSudokus(const uint8_t *sudokus, uint16_t *data);
+static void testSetupStep(uint16_t *data);
+
 static double time_ms(const clock_t start, const clock_t end);
-// #endregion
+#pragma endregion
 
 int main() {
   clock_t start = clock();
 
-  uint8_t *bytes =
-      (uint8_t *)malloc(SUDOKU_COUNT * BYTES_FOR_1_SUDOKU * sizeof(uint8_t));
+  uint8_t *bytes = (uint8_t *)malloc(SUDOKU_COUNT * BYTES_FOR_1_SUDOKU * sizeof(uint8_t));
   FILE *fp = fopen("../sudoku.csv", "r");
 
   fread(bytes, sizeof(uint8_t), SUDOKU_COUNT * BYTES_FOR_1_SUDOKU, fp);
@@ -63,10 +66,16 @@ static void run(const uint8_t *bytes) {
 
 static void solve16sudokus(const uint8_t *sudokus, uint16_t *data) {
   transformSudokus(sudokus, data);
+#ifdef TEST
+  testTransformSudokus(sudokus, data);
+#endif
 
   static int r2b[9] = {0, 0, 0, 3, 3, 3, 6, 6, 6};
 
   setupStep(data, r2b);
+#ifdef TEST
+  testSetupStep(data);
+#endif
 }
 
 static inline void transformSudokus(const uint8_t *sudokus, uint16_t *data) {
@@ -75,15 +84,13 @@ static inline void transformSudokus(const uint8_t *sudokus, uint16_t *data) {
   for (i = 0; i < 16; i++) {
     sOffset = i * BYTES_FOR_1_SUDOKU;
     for (j = 0; j < SUDOKU_CELL_COUNT; j++) {
-      data[(j << 4) + i] =
-          (uint16_t)(0b100000000 >> ('9' - sudokus[sOffset + j]));
+      data[(j << 4) + i] = (uint16_t)(0b100000000 >> ('9' - sudokus[sOffset + j]));
     }
   }
 }
 
 static inline void setupStep(uint16_t *data, int *r2b) {
-  uint16_t *p_rows = &data[ROW_OFFSET], *p_boxs = &data[BOX_OFFSET],
-           *p_cols = &data[COL_OFFSET];
+  uint16_t *p_rows = &data[ROW_OFFSET], *p_boxs = &data[BOX_OFFSET], *p_cols = &data[COL_OFFSET];
   int i, rowMaxI = 9 << 4;
 
   __m256i_u maskVec = _mm256_set1_epi16((short)0b111111111);
@@ -127,6 +134,60 @@ static inline void setupStep(uint16_t *data, int *r2b) {
 static void solveFullIteration() {
   // todo
 }
+
+#pragma region tests
+static inline void testTransformSudokus(const uint8_t *sudokus, uint16_t *data) {
+  int i, j, sOffset;
+  int testData[SUDOKU_CELL_COUNT << 4];
+
+  for (i = 0; i < 16; i++) {
+    sOffset = i * BYTES_FOR_1_SUDOKU;
+    for (j = 0; j < SUDOKU_CELL_COUNT; j++) {
+      testData[(j << 4) + i] = (uint16_t)(0b100000000 >> ('9' - sudokus[sOffset + j]));
+    }
+  }
+
+  for (i = 0; i < SUDOKU_CELL_COUNT << 4; i++) {
+    if (data[i] != testData[i]) {
+      printf("transform fail: %d <> %d", data[i], testData[i]);
+      exit(1);
+    }
+  }
+}
+static void testSetupStep(uint16_t *data) {
+  int len = DATA_LENGTH - ROW_OFFSET;
+  uint16_t dataArr[len];
+  for (int i = 0; i < len; i++) {
+    dataArr[i] = data[i + ROW_OFFSET];
+  }
+
+  uint16_t testData[len];
+  for (int i = 0; i < len; i++) {
+    testData[i] = 0b111111111;
+  }
+
+  uint16_t *p_rows = &testData[0], *p_boxs = &testData[9 << 4], *p_cols = &testData[(9 << 4) * 2];
+  for (int i = 0; i < 16; i++) {
+    for (int p = 0; p < 81; p++) {
+      int r = p / 9;
+      int c = p % 9;
+      int b = r / 3 * 3 + c / 3;
+
+      uint16_t mask = ~data[(p << 4) + i];
+      p_rows[(r << 4) + i] &= mask;
+      p_boxs[(b << 4) + i] &= mask;
+      p_cols[(c << 4) + i] &= mask;
+    }
+  }
+
+  for (int i = 0; i < len; i++) {
+    if (dataArr[i] != testData[i]) {
+      printf("SetupStep fail: %d <> %d", dataArr[i], testData[i]);
+      exit(1);
+    }
+  }
+}
+#pragma endregion
 
 static double time_ms(const clock_t start, const clock_t end) {
   return ((double)(end - start) * 1000 / CLOCKS_PER_SEC);
