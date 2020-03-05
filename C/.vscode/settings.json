@@ -3,6 +3,7 @@
     "**/*.exe": true
   },
   "files.associations": {
+    "*.ascx": "html",
     "iostream": "cpp",
     "iosfwd": "cpp",
     "limits": "cpp",
@@ -19,6 +20,7 @@
     "sstream": "cpp",
     "streambuf": "cpp",
     "regex": "cpp",
-    "valarray": "cpp"
+    "valarray": "cpp",
+    "immintrin.h": "c"
   }
 }

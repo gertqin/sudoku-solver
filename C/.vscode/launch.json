@@ -23,7 +23,7 @@
           "ignoreFailures": true
         }
       ],
-      "preLaunchTask": "build c default"
+      "preLaunchTask": "build c debug"
     }
   ]
 }
