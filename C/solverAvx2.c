@@ -4,7 +4,7 @@
 #include "time.h"
 
 // #define TEST
-#define CHECK_SOLUTION
+#define CHECK_SOLUTIONS
 
 #define SUDOKU_COUNT 1000000
 
@@ -28,12 +28,16 @@ static void run(const uint8_t *bytes);
 static void solve16sudokus(const uint8_t *sudokus, uint16_t *data);
 static void transformSudokus(const uint8_t *sudokus, uint16_t *data);
 static void setupStep(uint16_t *data, int *r2b);
+static void solveFullIteration(uint16_t *data, int *r2b);
+static void check_solutions(uint16_t *data, uint16_t *solutions);
 
 static void testTransformSudokus(const uint8_t *sudokus, uint16_t *data);
 static void testSetupStep(uint16_t *data);
 
 static double time_ms(const clock_t start, const clock_t end);
 #pragma endregion
+
+int failedCount = 0;
 
 int main() {
   clock_t start = clock();
@@ -52,6 +56,7 @@ int main() {
   run(bytes);
   end = clock();
   printf("Solving 1.000.000 sudokus took: %.0fms\n", time_ms(start, end));
+  printf("Failed: %d", failedCount);
 
   return 0;
 }
@@ -75,6 +80,16 @@ static void solve16sudokus(const uint8_t *sudokus, uint16_t *data) {
   setupStep(data, r2b);
 #ifdef TEST
   testSetupStep(data);
+#endif
+
+  for (int i = 0; i < 4; i++) {
+    solveFullIteration(data, r2b);
+  }
+
+#ifdef CHECK_SOLUTIONS
+  static uint16_t solutions[SUDOKU_CELL_COUNT << 4];
+  transformSudokus(&sudokus[SUDOKU_CELL_COUNT + 1], solutions);
+  check_solutions(data, solutions);
 #endif
 }
 
@@ -131,8 +146,80 @@ static inline void setupStep(uint16_t *data, int *r2b) {
   }
 }
 
-static void solveFullIteration() {
+static inline void solveFullIteration(uint16_t *data, int *r2b) {
+  uint16_t *p_rows = &data[ROW_OFFSET], *p_boxs = &data[BOX_OFFSET], *p_cols = &data[COL_OFFSET];
+
+  int p = 0, r = 0, b, c, maxB, maxC;
+  __m256i_u *p_r, *p_b, *p_c, *p_p;
+  __m256i_u zeroVec = _mm256_setzero_si256();
+  __m256i_u oneVec = _mm256_set1_epi16((short)1);
+
+  for (; r < 9; r++) {
+    p_r = (__m256i_u *)&p_rows[r << 4];
+    __m256i_u rVec = _mm256_loadu_si256(p_r);
+
+    b = r2b[r];
+    c = 0;
+    maxB = b + 3;
+    for (; b < maxB; b++) {
+      p_b = (__m256i_u *)&p_boxs[b << 4];
+      __m256i_u bVec = _mm256_loadu_si256(p_b);
+
+      maxC = c + 3;
+      for (; c < maxC; c++, p++) {
+        p_c = (__m256i_u *)&p_cols[c << 4];
+        p_p = (__m256i_u *)&data[p << 4];
+        __m256i cVec = _mm256_loadu_si256(p_c);
+        __m256i pVec = _mm256_loadu_si256(p_p);
+
+        __m256i bits = _mm256_and_si256(rVec, bVec);
+        bits = _mm256_and_si256(bits, cVec);
+        bits = _mm256_or_si256(bits, pVec);
+
+        __m256i mask = _mm256_cmpeq_epi16(_mm256_and_si256(bits, _mm256_sub_epi16(bits, oneVec)), zeroVec);
+
+        bits = _mm256_and_si256(mask, bits);
+
+        pVec = _mm256_or_si256(bits, pVec);
+        rVec = _mm256_andnot_si256(bits, rVec);
+        bVec = _mm256_andnot_si256(bits, bVec);
+        cVec = _mm256_andnot_si256(bits, cVec);
+
+        _mm256_storeu_si256(p_p, pVec);
+        _mm256_storeu_si256(p_c, cVec);
+      }
+
+      _mm256_storeu_si256(p_b, bVec);
+    }
+    _mm256_storeu_si256(p_r, rVec);
+  }
+}
+
+typedef struct {
+  uint16_t *p_p;
+  uint16_t *p_r;
+  uint16_t *p_b;
+  uint16_t *p_c;
+} cell_t;
+
+static inline void solveQueue(uint16_t *data, int *r2b) {
+  cell_t cells[SUDOKU_CELL_COUNT * 3];
+
   // todo
+}
+
+static inline void check_solutions(uint16_t *data, uint16_t *solutions) {
+  int maxI = SUDOKU_CELL_COUNT << 4;
+  for (int i = 0; i < maxI; i += 16) {
+    __m256i_u pVec = _mm256_loadu_si256((__m256i_u *)&data[i]);
+    __m256i_u sVec = _mm256_loadu_si256((__m256i_u *)&solutions[i]);
+    __m256i_u mask = _mm256_cmpeq_epi16(pVec, sVec);
+
+    if (_mm256_movemask_epi8(mask) != 0xFFFFFFFF) {
+      ++failedCount;
+      break;
+    }
+  }
 }
 
 #pragma region tests
