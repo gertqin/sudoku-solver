@@ -13,9 +13,7 @@
 #define COL_OFFSET 99
 #define DATA_LENGTH 108
 
-static double time_ms(clock_t start, clock_t end) {
-  return ((double)(end - start) * 1000 / CLOCKS_PER_SEC);
-}
+static double time_ms(clock_t start, clock_t end) { return ((double)(end - start) * 1000 / CLOCKS_PER_SEC); }
 
 static void vecTest() {
   unsigned long long nums[8];
@@ -27,8 +25,7 @@ static void vecTest() {
 }
 
 static void loop1(uint32_t *data) {
-  uint32_t *p_puzzle = data, *p_row = data + ROW_OFFSET,
-           *p_box = data + BOX_OFFSET, *p_col = data + COL_OFFSET;
+  uint32_t *p_puzzle = data, *p_row = data + ROW_OFFSET, *p_box = data + BOX_OFFSET, *p_col = data + COL_OFFSET;
 
   int r, b, c, p, maxB, maxCol;
   static int r2b[9] = {0, 0, 0, 3, 3, 3, 6, 6, 6};
@@ -50,8 +47,7 @@ static void loop1(uint32_t *data) {
 }
 
 static void loop2(uint32_t *data) {
-  uint32_t *p_puzzle = data, *p_row = data + ROW_OFFSET,
-           *p_box = data + BOX_OFFSET, *p_col = data + COL_OFFSET;
+  uint32_t *p_puzzle = data, *p_row = data + ROW_OFFSET, *p_box = data + BOX_OFFSET, *p_col = data + COL_OFFSET;
 
   int r, b, c, p, maxB, maxCol;
 
@@ -67,8 +63,7 @@ static void loop2(uint32_t *data) {
 }
 
 static void loop3(uint32_t *data) {
-  uint32_t *p_puzzle = data, *p_row = data + ROW_OFFSET,
-           *p_box = data + BOX_OFFSET, *p_col = data + COL_OFFSET;
+  uint32_t *p_puzzle = data, *p_row = data + ROW_OFFSET, *p_box = data + BOX_OFFSET, *p_col = data + COL_OFFSET;
 
   int r, b, c, p, maxB, maxCol;
   static int p2r[81], p2b[81], p2c[81];
@@ -91,8 +86,7 @@ static void loop3(uint32_t *data) {
 }
 
 static void loop4(uint32_t *data) {
-  uint32_t *p_puzzle = data, *p_row = data + ROW_OFFSET,
-           *p_box = data + BOX_OFFSET, *p_col = data + COL_OFFSET;
+  uint32_t *p_puzzle = data, *p_row = data + ROW_OFFSET, *p_box = data + BOX_OFFSET, *p_col = data + COL_OFFSET;
 
   int r, b, c, p, z, maxB, maxCol;
   static int x[81];
@@ -123,8 +117,7 @@ typedef struct {
 } rbc_t;
 
 static void loop5(uint32_t *data) {
-  uint32_t *p_puzzle = data, *p_row = data + ROW_OFFSET,
-           *p_box = data + BOX_OFFSET, *p_col = data + COL_OFFSET;
+  uint32_t *p_puzzle = data, *p_row = data + ROW_OFFSET, *p_box = data + BOX_OFFSET, *p_col = data + COL_OFFSET;
 
   int r, b, c, p, z, maxB, maxCol;
   static rbc_t x[81];
@@ -145,6 +138,34 @@ static void loop5(uint32_t *data) {
   }
 }
 
+typedef struct {
+  int r, b, c;
+} rbc2_t;
+
+static void loop6(uint32_t *data) {
+  uint32_t *p_puzzle = data, *p_row = data + ROW_OFFSET, *p_box = data + BOX_OFFSET, *p_col = data + COL_OFFSET;
+
+  int r, b, c, p, z, maxB, maxCol;
+  int len = 81 * 3;
+  static int x[81 * 3];
+
+  for (p = 0; p < 81; p++) {
+    r = p / 9;
+    c = p % 9;
+    b = r / 3 * 3 + c / 3 * 3;
+    x[p * 3] = r;
+    x[p * 3 + 1] = b;
+    x[p * 3 + 2] = c;
+  }
+
+  for (int i = 0; i < 10000000; i++) {
+    for (p = 0; p < len; p += 3) {
+
+      p_puzzle[p] = p_row[x[p]] + p_box[x[p + 1]] + p_col[x[p + 2]];
+    }
+  }
+}
+
 static void loopPerformanceTests() {
   uint32_t data[DATA_LENGTH];
 
@@ -156,10 +177,10 @@ static void loopPerformanceTests() {
   clock_t end = clock();
   printf("Loop1 took: %fms\n", time_ms(start, end));
 
-  start = clock();
-  loop2(data);
-  end = clock();
-  printf("Loop2 took: %fms\n", time_ms(start, end));
+  // start = clock();
+  // loop2(data);
+  // end = clock();
+  // printf("Loop2 took: %fms\n", time_ms(start, end));
 
   start = clock();
   loop3(data);
@@ -175,6 +196,11 @@ static void loopPerformanceTests() {
   loop5(data);
   end = clock();
   printf("Loop5 took: %fms\n", time_ms(start, end));
+
+  start = clock();
+  loop6(data);
+  end = clock();
+  printf("Loop6 took: %fms\n", time_ms(start, end));
 }
 
 int main() {

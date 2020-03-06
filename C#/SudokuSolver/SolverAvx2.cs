@@ -21,6 +21,7 @@ namespace SudokuSolver
     static int[] cell2box = new int[SUDOKU_CELL_COUNT];
 
     public static int FailedCount = 0;
+    public static int TotalQueueLength = 0;
 
     public static void GlobalSetup()
     {
@@ -181,9 +182,10 @@ namespace SudokuSolver
     {
       SetupStep(data);
 
-      SolveStep(data, iterations: 6);
+      SolveStep(data, iterations: 3);
+      SolveQueueStep(data);
 
-      SolveRemainingStep(data);
+      //SolveRemainingStep(data);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -301,6 +303,95 @@ namespace SudokuSolver
             Avx.Store(p_box, bVec);
           }
         } while (--iterations > 0);
+      }
+    }
+
+    struct cell_t {
+      public int p, r, b, c;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    static unsafe void SolveQueueStep(Span<ushort> data)
+    {
+      fixed (ushort* p_puzzles = &data[0], p_rows = &data[ROW_OFFSET], p_cols = &data[COL_OFFSET], p_boxs = &data[BOX_OFFSET])
+      {
+        int r, c, i;
+        var zeroVec = Vector256<ushort>.Zero;
+        var oneVec = Vector256.Create((ushort)1);
+
+        Vector256<ushort> rVec, bVec, cVec, pVec, bits, bitsWithoutLSB, mask;
+        ushort* p_row, p_box, p_col, p_puzzle;
+
+        int qLen = SUDOKU_CELL_COUNT * 3, qEnd = 0, qIdx = 0;
+        Span<cell_t> queue = stackalloc cell_t[qLen];
+
+        i = 0;
+        for (r = 0; r < 9; ++r)
+        {
+          for (c = 0; c < 9; c++)
+          {
+            p_puzzle = &p_puzzles[i << 4];
+            pVec = Avx.LoadVector256(p_puzzle);
+
+            if (Avx2.MoveMask(Avx2.CompareEqual(pVec, zeroVec).AsByte()) > 0)
+            {
+              int b = cell2box[i] >> 4;
+              queue[qEnd++] = new cell_t() { p = i, r = r, b = b, c = c };
+            }
+
+            i++;
+          }
+        }
+
+        qIdx = 0;
+
+        while (qIdx < qEnd && qEnd < qLen)
+        {
+          cell_t cell = queue[qIdx];
+
+          p_row = &p_rows[cell.r << 4];
+          p_box = &p_boxs[cell.b << 4];
+          p_col = &p_cols[cell.c << 4];
+          p_puzzle = &p_puzzles[cell.p << 4];
+
+          rVec = Avx.LoadVector256(p_row);
+          bVec = Avx.LoadVector256(p_box);
+          cVec = Avx.LoadVector256(p_col);
+          pVec = Avx.LoadVector256(p_puzzle);
+
+          bits = Avx2.Or(
+            Avx2.And(Avx2.And(rVec, bVec), cVec),
+            pVec
+          );
+
+          bitsWithoutLSB = Avx2.And(bits, Avx2.Subtract(bits, oneVec));
+          mask = Avx2.CompareEqual(bitsWithoutLSB, zeroVec);
+
+          bits = Avx2.And(mask, bits);
+
+          rVec = Avx2.AndNot(bits, rVec);
+          bVec = Avx2.AndNot(bits, bVec);
+          cVec = Avx2.AndNot(bits, cVec);
+          pVec = Avx2.Or(bits, pVec);
+
+          Avx.Store(p_puzzle, pVec);
+          Avx.Store(p_row, rVec);
+          Avx.Store(p_box, bVec);
+          Avx.Store(p_col, cVec);
+
+          if (qEnd < qLen && Avx2.MoveMask(Avx2.CompareEqual(pVec, zeroVec).AsByte()) > 0)
+          {
+            queue[qEnd++] = cell;
+          }
+
+          qIdx++;
+        }
+
+        TotalQueueLength += qEnd;
+        if (qEnd == qLen)
+        {
+          Console.WriteLine("Yaiks");
+        }
       }
     }
 

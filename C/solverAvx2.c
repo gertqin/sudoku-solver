@@ -29,6 +29,7 @@ static void solve16sudokus(const uint8_t *sudokus, uint16_t *data);
 static void transformSudokus(const uint8_t *sudokus, uint16_t *data);
 static void setupStep(uint16_t *data, int *r2b);
 static void solveFullIteration(uint16_t *data, int *r2b);
+static void solveQueue(uint16_t *data, int *r2b);
 static void check_solutions(uint16_t *data, uint16_t *solutions);
 
 static void testTransformSudokus(const uint8_t *sudokus, uint16_t *data);
@@ -38,6 +39,7 @@ static double time_ms(const clock_t start, const clock_t end);
 #pragma endregion
 
 int failedCount = 0;
+uint64_t queueLengthTotal = 0;
 
 int main() {
   clock_t start = clock();
@@ -56,7 +58,10 @@ int main() {
   run(bytes);
   end = clock();
   printf("Solving 1.000.000 sudokus took: %.0fms\n", time_ms(start, end));
-  printf("Failed: %d", failedCount);
+  printf("Failed: %d\n", failedCount);
+
+  printf("Full iterations: %d\n", (1000000 >> 4) * 3 * SUDOKU_CELL_COUNT);
+  printf("Queue iterations: %d\n", queueLengthTotal);
 
   return 0;
 }
@@ -82,9 +87,10 @@ static void solve16sudokus(const uint8_t *sudokus, uint16_t *data) {
   testSetupStep(data);
 #endif
 
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 3; i++) {
     solveFullIteration(data, r2b);
   }
+  solveQueue(data, r2b);
 
 #ifdef CHECK_SOLUTIONS
   static uint16_t solutions[SUDOKU_CELL_COUNT << 4];
@@ -169,14 +175,14 @@ static inline void solveFullIteration(uint16_t *data, int *r2b) {
       for (; c < maxC; c++, p++) {
         p_c = (__m256i_u *)&p_cols[c << 4];
         p_p = (__m256i_u *)&data[p << 4];
-        __m256i cVec = _mm256_loadu_si256(p_c);
-        __m256i pVec = _mm256_loadu_si256(p_p);
+        __m256i_u cVec = _mm256_loadu_si256(p_c);
+        __m256i_u pVec = _mm256_loadu_si256(p_p);
 
-        __m256i bits = _mm256_and_si256(rVec, bVec);
+        __m256i_u bits = _mm256_and_si256(rVec, bVec);
         bits = _mm256_and_si256(bits, cVec);
         bits = _mm256_or_si256(bits, pVec);
 
-        __m256i mask = _mm256_cmpeq_epi16(_mm256_and_si256(bits, _mm256_sub_epi16(bits, oneVec)), zeroVec);
+        __m256i_u mask = _mm256_cmpeq_epi16(_mm256_and_si256(bits, _mm256_sub_epi16(bits, oneVec)), zeroVec);
 
         bits = _mm256_and_si256(mask, bits);
 
@@ -196,16 +202,80 @@ static inline void solveFullIteration(uint16_t *data, int *r2b) {
 }
 
 typedef struct {
-  uint16_t *p_p;
-  uint16_t *p_r;
-  uint16_t *p_b;
-  uint16_t *p_c;
+  int p, r, b, c;
 } cell_t;
 
 static inline void solveQueue(uint16_t *data, int *r2b) {
-  cell_t cells[SUDOKU_CELL_COUNT * 3];
+  uint16_t *p_rows = &data[ROW_OFFSET], *p_boxs = &data[BOX_OFFSET], *p_cols = &data[COL_OFFSET];
 
-  // todo
+  int qLen = SUDOKU_CELL_COUNT * 3, qEnd = 0;
+  cell_t queue[qLen];
+
+  int p = 0, r = 0, b, c, maxB, maxC;
+  __m256i_u *p_r, *p_b, *p_c, *p_p;
+  __m256i_u zeroVec = _mm256_setzero_si256();
+  __m256i_u oneVec = _mm256_set1_epi16((short)1);
+
+  for (; r < 9; r++) {
+    b = r2b[r];
+    c = 0;
+    maxB = b + 3;
+    for (; b < maxB; b++) {
+      maxC = c + 3;
+      for (; c < maxC; c++, p++) {
+        p_p = (__m256i_u *)&data[p << 4];
+        __m256i pVec = _mm256_loadu_si256(p_p);
+
+        if ((uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi16(pVec, zeroVec)) > 0) {
+          cell_t cell = (cell_t){p << 4, r << 4, b << 4, c << 4};
+          queue[qEnd++] = cell;
+        }
+      }
+    }
+  }
+
+  int qIdx = 0;
+  while (qIdx < qEnd && qIdx < qLen) {
+    cell_t cell = queue[qIdx];
+
+    p_p = (__m256i_u *)&data[cell.p];
+    p_r = (__m256i_u *)&p_rows[cell.r];
+    p_b = (__m256i_u *)&p_boxs[cell.b];
+    p_c = (__m256i_u *)&p_cols[cell.c];
+
+    __m256i_u rVec = _mm256_loadu_si256(p_r);
+    __m256i_u bVec = _mm256_loadu_si256(p_b);
+    __m256i_u cVec = _mm256_loadu_si256(p_c);
+    __m256i_u pVec = _mm256_loadu_si256(p_p);
+
+    __m256i_u bits = _mm256_and_si256(rVec, bVec);
+    bits = _mm256_and_si256(bits, cVec);
+    bits = _mm256_or_si256(bits, pVec);
+
+    __m256i_u mask = _mm256_cmpeq_epi16(_mm256_and_si256(bits, _mm256_sub_epi16(bits, oneVec)), zeroVec);
+    bits = _mm256_and_si256(mask, bits);
+
+    pVec = _mm256_or_si256(bits, pVec);
+    rVec = _mm256_andnot_si256(bits, rVec);
+    bVec = _mm256_andnot_si256(bits, bVec);
+    cVec = _mm256_andnot_si256(bits, cVec);
+
+    _mm256_storeu_si256(p_p, pVec);
+    _mm256_storeu_si256(p_c, cVec);
+    _mm256_storeu_si256(p_b, bVec);
+    _mm256_storeu_si256(p_r, rVec);
+
+    if (qEnd < qLen && (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi16(pVec, zeroVec)) > 0) {
+      queue[qEnd++] = cell;
+    }
+    ++qIdx;
+  }
+
+  int qIdx2 = qIdx;
+  int qLen2 = qLen;
+  int qEnd2 = qEnd;
+
+  queueLengthTotal += qEnd;
 }
 
 static inline void check_solutions(uint16_t *data, uint16_t *solutions) {
