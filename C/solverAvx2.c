@@ -3,7 +3,7 @@
 #include "stdio.h"
 #include "time.h"
 
-#define TEST
+// #define TEST
 #define CHECK_SOLUTIONS
 
 #define SUDOKU_COUNT 1000000
@@ -33,7 +33,6 @@ static void convert2base2(__m256i_u *cellVec, __m256i_u *charVec, __m256i_u *one
 
 static void setup_step(uint16_t *data, int *r2b);
 static void solve_parallel(uint16_t *data, int *r2b);
-static void solve_queue(uint16_t *data, int *r2b);
 static void solve_cell(__m256i_u *pVec, __m256i_u *rVec, __m256i_u *bVec, __m256i_u *cVec, __m256i_u *zeroVec,
                        __m256i_u *oneVec);
 static void check_solutions(uint16_t *data, uint16_t *solutions);
@@ -230,7 +229,7 @@ static inline void convert2base2(__m256i_u *cellVec, __m256i_u *nineCharVec, __m
 
   __m256i_u cellsInBase2 = _mm256_packus_epi32(lowCellsInBase2, highCellsInBase2);
   // shuffle packed bytes into order 00 10 01 11 = 1,3,2,4
-  cellsInBase2 = _mm256_permute4x64_epi64(cellsInBase2, 0b11100100);
+  cellsInBase2 = _mm256_permute4x64_epi64(cellsInBase2, 0b11011000);
   *cellVec = cellsInBase2;
 }
 
