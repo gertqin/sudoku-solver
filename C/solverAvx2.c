@@ -269,17 +269,17 @@ static void transpose16x8(const uint8_t *p_src, uint16_t *p_dest) {
 
   nineCharVec = _mm256_set1_epi8('9');
 
-  v1 = _mm256_set_epi64x(*((uint64_t *)p_src), *((uint64_t *)(p_src + BYTES_FOR_4_SUDOKUS)),
-                         *((uint64_t *)(p_src + BYTES_FOR_8_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_C_SUDOKUS)));
+  v1 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_C_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_8_SUDOKUS)),
+                         *((uint64_t *)(p_src + BYTES_FOR_4_SUDOKUS)), *((uint64_t *)(p_src)));
 
-  v2 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_1_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_5_SUDOKUS)),
-                         *((uint64_t *)(p_src + BYTES_FOR_9_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_D_SUDOKUS)));
+  v2 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_D_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_9_SUDOKUS)),
+                         *((uint64_t *)(p_src + BYTES_FOR_5_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_1_SUDOKUS)));
 
-  v3 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_2_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_6_SUDOKUS)),
-                         *((uint64_t *)(p_src + BYTES_FOR_A_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_E_SUDOKUS)));
+  v3 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_E_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_A_SUDOKUS)),
+                         *((uint64_t *)(p_src + BYTES_FOR_6_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_2_SUDOKUS)));
 
-  v4 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_3_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_5_SUDOKUS)),
-                         *((uint64_t *)(p_src + BYTES_FOR_B_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_F_SUDOKUS)));
+  v4 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_F_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_B_SUDOKUS)),
+                         *((uint64_t *)(p_src + BYTES_FOR_7_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_3_SUDOKUS)));
 
   v1 = _mm256_sub_epi8(nineCharVec, v1);
   v2 = _mm256_sub_epi8(nineCharVec, v2);

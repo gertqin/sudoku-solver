@@ -21,6 +21,7 @@
     "streambuf": "cpp",
     "regex": "cpp",
     "valarray": "cpp",
-    "immintrin.h": "c"
+    "immintrin.h": "c",
+    "avx2intrin.h": "c"
   }
 }
