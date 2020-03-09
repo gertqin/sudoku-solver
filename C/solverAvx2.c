@@ -3,13 +3,13 @@
 #include "stdio.h"
 #include "time.h"
 
-// #define TEST
+#define TEST
 #define CHECK_SOLUTIONS
 
 #define SUDOKU_COUNT 1000000
 
 #define SUDOKU_CELL_COUNT 81
-#define BYTES_FOR_1_SUDOKU 164
+#define BYTES_FOR_1_SUDOKUS 164
 #define BYTES_FOR_2_SUDOKUS 328
 #define BYTES_FOR_3_SUDOKUS 492
 #define BYTES_FOR_4_SUDOKUS 656
@@ -17,6 +17,13 @@
 #define BYTES_FOR_6_SUDOKUS 984
 #define BYTES_FOR_7_SUDOKUS 1148
 #define BYTES_FOR_8_SUDOKUS 1312
+#define BYTES_FOR_9_SUDOKUS 1476
+#define BYTES_FOR_A_SUDOKUS 1640
+#define BYTES_FOR_B_SUDOKUS 1804
+#define BYTES_FOR_C_SUDOKUS 1968
+#define BYTES_FOR_D_SUDOKUS 2132
+#define BYTES_FOR_E_SUDOKUS 2296
+#define BYTES_FOR_F_SUDOKUS 2460
 
 #define ROW_OFFSET 1296  // 81 << 4
 #define BOX_OFFSET 1440  // + 9 << 4
@@ -29,7 +36,11 @@ static void solve16sudokus(const uint8_t *sudokus, uint16_t *data);
 
 static void transform_sudokus(const uint8_t *sudokus, uint16_t *data);
 static void transpose8x16(const uint8_t *p_src, uint16_t *p_dest);
-static void convert2base2(__m256i_u *cellVec, __m256i_u *charVec, __m256i_u *oneVec);
+static void convert2base2(__m256i_u *cellVec, __m256i_u *nineCharVec, __m256i_u *nineBitVec);
+
+static void transform_sudokus_2(const uint8_t *sudokus, uint16_t *data);
+static void transpose16x8(const uint8_t *p_src, uint16_t *p_dest);
+static void convert2base2_2(__m256i_u *cellVec, __m256i_u *nineBitVec);
 
 static void setup_step(uint16_t *data, int *r2b);
 static void solve_parallel(uint16_t *data, int *r2b);
@@ -49,10 +60,10 @@ uint64_t queueLengthTotal = 0;
 int main() {
   clock_t start = clock();
 
-  uint8_t *bytes = (uint8_t *)malloc(SUDOKU_COUNT * BYTES_FOR_1_SUDOKU * sizeof(uint8_t));
+  uint8_t *bytes = (uint8_t *)malloc(SUDOKU_COUNT * BYTES_FOR_1_SUDOKUS * sizeof(uint8_t));
   FILE *fp = fopen("../sudoku.csv", "r");
 
-  fread(bytes, sizeof(uint8_t), SUDOKU_COUNT * BYTES_FOR_1_SUDOKU, fp);
+  fread(bytes, sizeof(uint8_t), SUDOKU_COUNT * BYTES_FOR_1_SUDOKUS, fp);
 
   fclose(fp);
 
@@ -75,12 +86,12 @@ static void run(const uint8_t *bytes) {
   static uint16_t data[DATA_LENGTH];
 
   for (int i = 0; i < SUDOKU_COUNT; i += 16) {
-    solve16sudokus(&bytes[i * BYTES_FOR_1_SUDOKU], data);
+    solve16sudokus(&bytes[i * BYTES_FOR_1_SUDOKUS], data);
   }
 }
 
 static void solve16sudokus(const uint8_t *sudokus, uint16_t *data) {
-  transform_sudokus(sudokus, data);
+  transform_sudokus_2(sudokus, data);
 #ifdef TEST
   test_transform_sudokus(sudokus, data);
 #endif
@@ -110,7 +121,7 @@ static inline void transform_sudokus(const uint8_t *sudokus, uint16_t *data) {
   for (i = 0; i < 5; i++) {
     // solve 16x16
     transpose8x16(p_src, p_dest);
-    transpose8x16(p_src + (BYTES_FOR_1_SUDOKU << 3), p_dest + 8);
+    transpose8x16(p_src + (BYTES_FOR_1_SUDOKUS << 3), p_dest + 8);
 
     p_src += 16;
     p_dest += (1 << 8);
@@ -118,7 +129,7 @@ static inline void transform_sudokus(const uint8_t *sudokus, uint16_t *data) {
 
   for (i = 0; i < 16; i++) {
     *p_dest = (uint16_t)(0b100000000 >> ('9' - *p_src));
-    p_src += BYTES_FOR_1_SUDOKU;
+    p_src += BYTES_FOR_1_SUDOKUS;
     ++p_dest;
   }
 }
@@ -128,7 +139,7 @@ static inline void transpose8x16(const uint8_t *p_src, uint16_t *p_dest) {
   __m256i_u v1, v2, v3, v4, v5, v6, v7, v8, lo12, lo34, lo56, lo78, hi12, hi34, hi56, hi78;
 
   v1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)p_src), 0));
-  v2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_1_SUDOKU)), 0));
+  v2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_1_SUDOKUS)), 0));
   v3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_2_SUDOKUS)), 0));
   v4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_3_SUDOKUS)), 0));
   v5 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_4_SUDOKUS)), 0));
@@ -230,6 +241,119 @@ static inline void convert2base2(__m256i_u *cellVec, __m256i_u *nineCharVec, __m
   __m256i_u cellsInBase2 = _mm256_packus_epi32(lowCellsInBase2, highCellsInBase2);
   // shuffle packed bytes into order 00 10 01 11 = 1,3,2,4
   cellsInBase2 = _mm256_permute4x64_epi64(cellsInBase2, 0b11011000);
+  *cellVec = cellsInBase2;
+}
+
+static inline void transform_sudokus_2(const uint8_t *sudokus, uint16_t *data) {
+  int i, j;
+  const uint8_t *p_src = sudokus;
+  uint16_t *p_dest = data;
+
+  // 5x16 = 80
+  for (i = 0; i < 10; i++) {
+    // solve 16x8
+    transpose16x8(p_src, p_dest);
+
+    p_src += 8;
+    p_dest += (8 << 4);
+  }
+
+  for (i = 0; i < 16; i++) {
+    *p_dest = (uint16_t)(0b100000000 >> ('9' - *p_src));
+    p_src += BYTES_FOR_1_SUDOKUS;
+    ++p_dest;
+  }
+}
+static void transpose16x8(const uint8_t *p_src, uint16_t *p_dest) {
+  __m256i_u v1, v2, v3, v4, v, lo12, lo34, hi12, hi34, nineCharVec, permuteMask, nineBitVec;
+
+  nineCharVec = _mm256_set1_epi8('9');
+
+  v1 = _mm256_set_epi64x(*((uint64_t *)p_src), *((uint64_t *)(p_src + BYTES_FOR_4_SUDOKUS)),
+                         *((uint64_t *)(p_src + BYTES_FOR_8_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_C_SUDOKUS)));
+
+  v2 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_1_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_5_SUDOKUS)),
+                         *((uint64_t *)(p_src + BYTES_FOR_9_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_D_SUDOKUS)));
+
+  v3 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_2_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_6_SUDOKUS)),
+                         *((uint64_t *)(p_src + BYTES_FOR_A_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_E_SUDOKUS)));
+
+  v4 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_3_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_5_SUDOKUS)),
+                         *((uint64_t *)(p_src + BYTES_FOR_B_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_F_SUDOKUS)));
+
+  v1 = _mm256_sub_epi8(nineCharVec, v1);
+  v2 = _mm256_sub_epi8(nineCharVec, v2);
+  v3 = _mm256_sub_epi8(nineCharVec, v3);
+  v4 = _mm256_sub_epi8(nineCharVec, v4);
+
+  lo12 = _mm256_unpacklo_epi8(v1, v2);
+  lo34 = _mm256_unpacklo_epi8(v3, v4);
+  hi12 = _mm256_unpackhi_epi8(v1, v2);
+  hi34 = _mm256_unpackhi_epi8(v3, v4);
+
+  v1 = lo12;
+  v2 = lo34;
+  v3 = hi12;
+  v4 = hi34;
+
+  lo12 = _mm256_unpacklo_epi16(v1, v2);
+  lo34 = _mm256_unpacklo_epi16(v3, v4);
+  hi12 = _mm256_unpackhi_epi16(v1, v2);
+  hi34 = _mm256_unpackhi_epi16(v3, v4);
+
+  v1 = lo12;
+  v2 = hi12;
+  v3 = lo34;
+  v4 = hi34;
+
+  permuteMask = _mm256_set_epi32(7, 3, 5, 1, 6, 2, 4, 0);
+  v1 = _mm256_permutevar8x32_epi32(v1, permuteMask);
+  v2 = _mm256_permutevar8x32_epi32(v2, permuteMask);
+  v3 = _mm256_permutevar8x32_epi32(v3, permuteMask);
+  v4 = _mm256_permutevar8x32_epi32(v4, permuteMask);
+
+  nineBitVec = _mm256_set1_epi32(0b100000000);
+  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v1, 0));
+  convert2base2_2(&v, &nineBitVec);
+  _mm256_storeu_si256((__m256i_u *)p_dest, v);
+
+  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v1, 1));
+  convert2base2_2(&v, &nineBitVec);
+  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x10), v);
+
+  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v2, 0));
+  convert2base2_2(&v, &nineBitVec);
+  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x20), v);
+
+  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v2, 1));
+  convert2base2_2(&v, &nineBitVec);
+  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x30), v);
+
+  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v3, 0));
+  convert2base2_2(&v, &nineBitVec);
+  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x40), v);
+
+  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v3, 1));
+  convert2base2_2(&v, &nineBitVec);
+  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x50), v);
+
+  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v4, 0));
+  convert2base2_2(&v, &nineBitVec);
+  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x60), v);
+
+  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v4, 1));
+  convert2base2_2(&v, &nineBitVec);
+  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x70), v);
+}
+static void convert2base2_2(__m256i_u *cellVec, __m256i_u *nineBitVec) {
+  __m256i_u cellsInBase10 = *cellVec;
+  __m256i_u lowCellsInBase2 =
+      _mm256_srlv_epi32(*nineBitVec, _mm256_cvtepu16_epi32(_mm256_extracti128_si256(cellsInBase10, 0)));
+
+  __m256i_u highCellsInBase2 =
+      _mm256_srlv_epi32(*nineBitVec, _mm256_cvtepu16_epi32(_mm256_extracti128_si256(cellsInBase10, 1)));
+
+  __m256i_u cellsInBase2 = _mm256_packus_epi32(lowCellsInBase2, highCellsInBase2);
   *cellVec = cellsInBase2;
 }
 
@@ -383,7 +507,7 @@ static inline void test_transform_sudokus(const uint8_t *sudokus, uint16_t *data
   int testData[SUDOKU_CELL_COUNT << 4];
 
   for (i = 0; i < 16; i++) {
-    sOffset = i * BYTES_FOR_1_SUDOKU;
+    sOffset = i * BYTES_FOR_1_SUDOKUS;
     for (j = 0; j < SUDOKU_CELL_COUNT; j++) {
       testData[(j << 4) + i] = (uint16_t)(0b100000000 >> ('9' - sudokus[sOffset + j]));
     }

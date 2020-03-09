@@ -203,7 +203,23 @@ static void loopPerformanceTests() {
   printf("Loop6 took: %fms\n", time_ms(start, end));
 }
 
+void print32Vec(__m256i_u *vec) {
+  __m256i_u v = *vec;
+  for (int i = 0; i < 4; i++) {
+    printf("%d %d ", v[i] & 0xF, v[i] >> 32);
+  }
+  printf("\n");
+}
 int main() {
-  loopPerformanceTests();
+  __m256i_u permuteMask = _mm256_set_epi32(7, 3, 5, 1, 6, 2, 4, 0);
+  int x[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+  __m256i_u v = _mm256_loadu_si256((__m256i_u *)x);
+
+  print32Vec(&v);
+
+  v = _mm256_permutevar8x32_epi32(v, permuteMask);
+  print32Vec(&v);
+
+  // loopPerformanceTests();
   // todo
 }
