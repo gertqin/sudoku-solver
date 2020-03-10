@@ -3,8 +3,8 @@
 #include "stdio.h"
 #include "time.h"
 
-#define TEST
-#define CHECK_SOLUTIONS
+// #define TEST
+// #define CHECK_SOLUTIONS
 
 #define SUDOKU_COUNT 1000000
 
@@ -39,7 +39,7 @@ static void transpose8x16(const uint8_t *p_src, uint16_t *p_dest);
 static void convert2base2(__m256i_u *cellVec, __m256i_u *nineCharVec, __m256i_u *nineBitVec);
 
 static void transform_sudokus_2(const uint8_t *sudokus, uint16_t *data);
-static void transpose16x8(const uint8_t *p_src, uint16_t *p_dest);
+static void transpose8x16_2(const uint8_t *p_src, uint16_t *p_dest);
 static void convert2base2_2(__m256i_u *cellVec, __m256i_u *nineBitVec);
 
 static void setup_step(uint16_t *data, int *r2b);
@@ -91,7 +91,7 @@ static void run(const uint8_t *bytes) {
 }
 
 static void solve16sudokus(const uint8_t *sudokus, uint16_t *data) {
-  transform_sudokus_2(sudokus, data);
+  transform_sudokus(sudokus, data);
 #ifdef TEST
   test_transform_sudokus(sudokus, data);
 #endif
@@ -103,7 +103,7 @@ static void solve16sudokus(const uint8_t *sudokus, uint16_t *data) {
   test_setup_step(data);
 #endif
 
-  solve_parallel(data, r2b);
+  // solve_parallel(data, r2b);
 
 #ifdef CHECK_SOLUTIONS
   static uint16_t solutions[SUDOKU_CELL_COUNT << 4];
@@ -138,14 +138,14 @@ static inline void transform_sudokus(const uint8_t *sudokus, uint16_t *data) {
 static inline void transpose8x16(const uint8_t *p_src, uint16_t *p_dest) {
   __m256i_u v1, v2, v3, v4, v5, v6, v7, v8, lo12, lo34, lo56, lo78, hi12, hi34, hi56, hi78;
 
-  v1 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)p_src), 0));
-  v2 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_1_SUDOKUS)), 0));
-  v3 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_2_SUDOKUS)), 0));
-  v4 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_3_SUDOKUS)), 0));
-  v5 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_4_SUDOKUS)), 0));
-  v6 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_5_SUDOKUS)), 0));
-  v7 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_6_SUDOKUS)), 0));
-  v8 = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_7_SUDOKUS)), 0));
+  v1 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)p_src)));
+  v2 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_1_SUDOKUS))));
+  v3 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_2_SUDOKUS))));
+  v4 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_3_SUDOKUS))));
+  v5 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_4_SUDOKUS))));
+  v6 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_5_SUDOKUS))));
+  v7 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_6_SUDOKUS))));
+  v8 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_7_SUDOKUS))));
 
   lo12 = _mm256_unpacklo_epi16(v1, v2);
   lo34 = _mm256_unpacklo_epi16(v3, v4);
@@ -250,12 +250,13 @@ static inline void transform_sudokus_2(const uint8_t *sudokus, uint16_t *data) {
   uint16_t *p_dest = data;
 
   // 5x16 = 80
-  for (i = 0; i < 10; i++) {
-    // solve 16x8
-    transpose16x8(p_src, p_dest);
+  for (i = 0; i < 5; i++) {
+    // solve 16x16
+    transpose8x16_2(p_src, p_dest);
+    transpose8x16_2(p_src + (BYTES_FOR_1_SUDOKUS << 3), p_dest + 8);
 
-    p_src += 8;
-    p_dest += (8 << 4);
+    p_src += 16;
+    p_dest += (1 << 8);
   }
 
   for (i = 0; i < 16; i++) {
@@ -264,10 +265,19 @@ static inline void transform_sudokus_2(const uint8_t *sudokus, uint16_t *data) {
     ++p_dest;
   }
 }
-static void transpose16x8(const uint8_t *p_src, uint16_t *p_dest) {
-  __m256i_u v1, v2, v3, v4, v, lo12, lo34, hi12, hi34, nineCharVec, permuteMask, nineBitVec;
+static inline void transpose8x16_2(const uint8_t *p_src, uint16_t *p_dest) {
+  __m256i_u v1, v2, v3, v4, v5, v6, v7, v8, v, lo12, lo34, hi12, hi34, nineCharVec, permuteMask, nineBitVec;
 
   nineCharVec = _mm256_set1_epi8('9');
+
+  v1 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)p_src)));
+  v2 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_1_SUDOKUS))));
+  v3 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_2_SUDOKUS))));
+  v4 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_3_SUDOKUS))));
+  v5 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_4_SUDOKUS))));
+  v6 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_5_SUDOKUS))));
+  v7 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_6_SUDOKUS))));
+  v8 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_7_SUDOKUS))));
 
   v1 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_C_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_8_SUDOKUS)),
                          *((uint64_t *)(p_src + BYTES_FOR_4_SUDOKUS)), *((uint64_t *)(p_src)));
@@ -345,7 +355,7 @@ static void transpose16x8(const uint8_t *p_src, uint16_t *p_dest) {
   convert2base2_2(&v, &nineBitVec);
   _mm256_storeu_si256((__m256i_u *)(p_dest + 0x70), v);
 }
-static void convert2base2_2(__m256i_u *cellVec, __m256i_u *nineBitVec) {
+static inline void convert2base2_2(__m256i_u *cellVec, __m256i_u *nineBitVec) {
   __m256i_u cellsInBase10 = *cellVec;
   __m256i_u lowCellsInBase2 =
       _mm256_srlv_epi32(*nineBitVec, _mm256_cvtepu16_epi32(_mm256_extracti128_si256(cellsInBase10, 0)));
