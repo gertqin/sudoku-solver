@@ -182,10 +182,10 @@ namespace SudokuSolver
     {
       SetupStep(data);
 
-      SolveStep(data, iterations: 3);
-      SolveQueueStep(data);
+      SolveStep(data, iterations: 6);
+      //SolveQueueStep(data);
 
-      //SolveRemainingStep(data);
+      SolveRemainingStep(data);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

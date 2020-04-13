@@ -1,10 +1,11 @@
 #include "immintrin.h"
 #include "stdint.h"
 #include "stdio.h"
+#include "string.h"
 #include "time.h"
 
 // #define TEST
-// #define CHECK_SOLUTIONS
+#define CHECK_SOLUTIONS
 
 #define SUDOKU_COUNT 1000000
 
@@ -38,19 +39,18 @@ static void transform_sudokus(const uint8_t *sudokus, uint16_t *data);
 static void transpose8x16(const uint8_t *p_src, uint16_t *p_dest);
 static void convert2base2(__m256i_u *cellVec, __m256i_u *nineCharVec, __m256i_u *nineBitVec);
 
-static void transform_sudokus_2(const uint8_t *sudokus, uint16_t *data);
-static void transpose8x16_2(const uint8_t *p_src, uint16_t *p_dest);
-static void convert2base2_2(__m256i_u *cellVec, __m256i_u *nineBitVec);
-
 static void setup_step(uint16_t *data, int *r2b);
 static void solve_parallel(uint16_t *data, int *r2b);
 static void solve_cell(__m256i_u *pVec, __m256i_u *rVec, __m256i_u *bVec, __m256i_u *cVec, __m256i_u *zeroVec,
                        __m256i_u *oneVec);
+static char solve_single_puzzle(uint16_t *data, int *r2b, int puzzleOffset);
+
 static void check_solutions(uint16_t *data, uint16_t *solutions);
 
 static void test_transform_sudokus(const uint8_t *sudokus, uint16_t *data);
 static void test_setup_step(uint16_t *data);
 
+static void print_sudoku(uint16_t *data, int puzzleOffset);
 static double time_ms(const clock_t start, const clock_t end);
 #pragma endregion
 
@@ -103,7 +103,7 @@ static void solve16sudokus(const uint8_t *sudokus, uint16_t *data) {
   test_setup_step(data);
 #endif
 
-  // solve_parallel(data, r2b);
+  solve_parallel(data, r2b);
 
 #ifdef CHECK_SOLUTIONS
   static uint16_t solutions[SUDOKU_CELL_COUNT << 4];
@@ -113,7 +113,7 @@ static void solve16sudokus(const uint8_t *sudokus, uint16_t *data) {
 }
 
 static inline void transform_sudokus(const uint8_t *sudokus, uint16_t *data) {
-  int i, j;
+  int i;
   const uint8_t *p_src = sudokus;
   uint16_t *p_dest = data;
 
@@ -121,7 +121,7 @@ static inline void transform_sudokus(const uint8_t *sudokus, uint16_t *data) {
   for (i = 0; i < 5; i++) {
     // solve 16x16
     transpose8x16(p_src, p_dest);
-    transpose8x16(p_src + (BYTES_FOR_1_SUDOKUS << 3), p_dest + 8);
+    transpose8x16(p_src + BYTES_FOR_8_SUDOKUS, p_dest + 8);
 
     p_src += 16;
     p_dest += (1 << 8);
@@ -229,7 +229,6 @@ static inline void transpose8x16(const uint8_t *p_src, uint16_t *p_dest) {
   _mm_storeu_si128((__m128i_u *)(p_dest + 0xE0), _mm256_extracti128_si256(v7, 1));
   _mm_storeu_si128((__m128i_u *)(p_dest + 0xF0), _mm256_extracti128_si256(v8, 1));
 }
-
 static inline void convert2base2(__m256i_u *cellVec, __m256i_u *nineCharVec, __m256i_u *nineBitVec) {
   __m256i_u cellsInBase10 = _mm256_sub_epi16(*nineCharVec, *cellVec);
   __m256i_u lowCellsInBase2 =
@@ -241,129 +240,6 @@ static inline void convert2base2(__m256i_u *cellVec, __m256i_u *nineCharVec, __m
   __m256i_u cellsInBase2 = _mm256_packus_epi32(lowCellsInBase2, highCellsInBase2);
   // shuffle packed bytes into order 00 10 01 11 = 1,3,2,4
   cellsInBase2 = _mm256_permute4x64_epi64(cellsInBase2, 0b11011000);
-  *cellVec = cellsInBase2;
-}
-
-static inline void transform_sudokus_2(const uint8_t *sudokus, uint16_t *data) {
-  int i, j;
-  const uint8_t *p_src = sudokus;
-  uint16_t *p_dest = data;
-
-  // 5x16 = 80
-  for (i = 0; i < 5; i++) {
-    // solve 16x16
-    transpose8x16_2(p_src, p_dest);
-    transpose8x16_2(p_src + (BYTES_FOR_1_SUDOKUS << 3), p_dest + 8);
-
-    p_src += 16;
-    p_dest += (1 << 8);
-  }
-
-  for (i = 0; i < 16; i++) {
-    *p_dest = (uint16_t)(0b100000000 >> ('9' - *p_src));
-    p_src += BYTES_FOR_1_SUDOKUS;
-    ++p_dest;
-  }
-}
-static inline void transpose8x16_2(const uint8_t *p_src, uint16_t *p_dest) {
-  __m256i_u v1, v2, v3, v4, v5, v6, v7, v8, v, lo12, lo34, hi12, hi34, nineCharVec, permuteMask, nineBitVec;
-
-  nineCharVec = _mm256_set1_epi8('9');
-
-  v1 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)p_src)));
-  v2 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_1_SUDOKUS))));
-  v3 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_2_SUDOKUS))));
-  v4 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_3_SUDOKUS))));
-  v5 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_4_SUDOKUS))));
-  v6 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_5_SUDOKUS))));
-  v7 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_6_SUDOKUS))));
-  v8 = _mm256_cvtepi8_epi16(_mm256_castsi256_si128(_mm256_loadu_si256((__m256i_u *)(p_src + BYTES_FOR_7_SUDOKUS))));
-
-  v1 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_C_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_8_SUDOKUS)),
-                         *((uint64_t *)(p_src + BYTES_FOR_4_SUDOKUS)), *((uint64_t *)(p_src)));
-
-  v2 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_D_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_9_SUDOKUS)),
-                         *((uint64_t *)(p_src + BYTES_FOR_5_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_1_SUDOKUS)));
-
-  v3 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_E_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_A_SUDOKUS)),
-                         *((uint64_t *)(p_src + BYTES_FOR_6_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_2_SUDOKUS)));
-
-  v4 = _mm256_set_epi64x(*((uint64_t *)(p_src + BYTES_FOR_F_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_B_SUDOKUS)),
-                         *((uint64_t *)(p_src + BYTES_FOR_7_SUDOKUS)), *((uint64_t *)(p_src + BYTES_FOR_3_SUDOKUS)));
-
-  v1 = _mm256_sub_epi8(nineCharVec, v1);
-  v2 = _mm256_sub_epi8(nineCharVec, v2);
-  v3 = _mm256_sub_epi8(nineCharVec, v3);
-  v4 = _mm256_sub_epi8(nineCharVec, v4);
-
-  lo12 = _mm256_unpacklo_epi8(v1, v2);
-  lo34 = _mm256_unpacklo_epi8(v3, v4);
-  hi12 = _mm256_unpackhi_epi8(v1, v2);
-  hi34 = _mm256_unpackhi_epi8(v3, v4);
-
-  v1 = lo12;
-  v2 = lo34;
-  v3 = hi12;
-  v4 = hi34;
-
-  lo12 = _mm256_unpacklo_epi16(v1, v2);
-  lo34 = _mm256_unpacklo_epi16(v3, v4);
-  hi12 = _mm256_unpackhi_epi16(v1, v2);
-  hi34 = _mm256_unpackhi_epi16(v3, v4);
-
-  v1 = lo12;
-  v2 = hi12;
-  v3 = lo34;
-  v4 = hi34;
-
-  permuteMask = _mm256_set_epi32(7, 3, 5, 1, 6, 2, 4, 0);
-  v1 = _mm256_permutevar8x32_epi32(v1, permuteMask);
-  v2 = _mm256_permutevar8x32_epi32(v2, permuteMask);
-  v3 = _mm256_permutevar8x32_epi32(v3, permuteMask);
-  v4 = _mm256_permutevar8x32_epi32(v4, permuteMask);
-
-  nineBitVec = _mm256_set1_epi32(0b100000000);
-  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v1, 0));
-  convert2base2_2(&v, &nineBitVec);
-  _mm256_storeu_si256((__m256i_u *)p_dest, v);
-
-  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v1, 1));
-  convert2base2_2(&v, &nineBitVec);
-  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x10), v);
-
-  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v2, 0));
-  convert2base2_2(&v, &nineBitVec);
-  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x20), v);
-
-  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v2, 1));
-  convert2base2_2(&v, &nineBitVec);
-  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x30), v);
-
-  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v3, 0));
-  convert2base2_2(&v, &nineBitVec);
-  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x40), v);
-
-  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v3, 1));
-  convert2base2_2(&v, &nineBitVec);
-  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x50), v);
-
-  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v4, 0));
-  convert2base2_2(&v, &nineBitVec);
-  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x60), v);
-
-  v = _mm256_cvtepi8_epi16(_mm256_extracti128_si256(v4, 1));
-  convert2base2_2(&v, &nineBitVec);
-  _mm256_storeu_si256((__m256i_u *)(p_dest + 0x70), v);
-}
-static inline void convert2base2_2(__m256i_u *cellVec, __m256i_u *nineBitVec) {
-  __m256i_u cellsInBase10 = *cellVec;
-  __m256i_u lowCellsInBase2 =
-      _mm256_srlv_epi32(*nineBitVec, _mm256_cvtepu16_epi32(_mm256_extracti128_si256(cellsInBase10, 0)));
-
-  __m256i_u highCellsInBase2 =
-      _mm256_srlv_epi32(*nineBitVec, _mm256_cvtepu16_epi32(_mm256_extracti128_si256(cellsInBase10, 1)));
-
-  __m256i_u cellsInBase2 = _mm256_packus_epi32(lowCellsInBase2, highCellsInBase2);
   *cellVec = cellsInBase2;
 }
 
@@ -478,8 +354,27 @@ static inline void solve_parallel(uint16_t *data, int *r2b) {
     }
     ++qIdx;
   }
-
   queueLengthTotal += qIdx;
+
+  if (qEnd == qLen) {
+    for (; qIdx < qLen; qIdx++) {
+      cell_t cell = queue[qIdx];
+      __m256i_u rVec = _mm256_loadu_si256(cell.p_r);
+      __m256i_u bVec = _mm256_loadu_si256(cell.p_b);
+      __m256i_u cVec = _mm256_loadu_si256(cell.p_c);
+      __m256i_u pVec = _mm256_loadu_si256(cell.p_p);
+
+      uint32_t mask = (uint32_t)_mm256_movemask_epi8(_mm256_cmpgt_epi16(rVec, zeroVec));
+      if (mask > 0) {
+        for (i = 0; i != 16; ++i) {
+          if ((mask & 1) == 1)
+            solve_single_puzzle(data, r2b, i);
+
+          mask >>= 2;
+        }
+      }
+    }
+  }
 }
 
 static inline void solve_cell(__m256i_u *pVec, __m256i_u *rVec, __m256i_u *bVec, __m256i_u *cVec, __m256i_u *zeroVec,
@@ -495,6 +390,83 @@ static inline void solve_cell(__m256i_u *pVec, __m256i_u *rVec, __m256i_u *bVec,
   *rVec = _mm256_andnot_si256(bits, *rVec);
   *bVec = _mm256_andnot_si256(bits, *bVec);
   *cVec = _mm256_andnot_si256(bits, *cVec);
+}
+
+static char solve_single_puzzle(uint16_t *data, int *r2b, int puzzleOffset) {
+  uint16_t *p_puzzles = &data[puzzleOffset], *p_rows = &data[ROW_OFFSET + puzzleOffset],
+           *p_boxs = &data[BOX_OFFSET + puzzleOffset], *p_cols = &data[COL_OFFSET + puzzleOffset];
+
+  int i, p, r, b, c, maxB, maxC;
+
+  char progress = 0;
+  do {
+    progress = 0;
+
+    for (p = 0, r = 0; r < 9; r++) {
+      for (b = r2b[r], maxB = b + 3, c = 0; b < maxB; b++) {
+        for (maxC = c + 3; c < maxC; c++, p++) {
+          uint16_t puzzleVal = p_puzzles[p << 4];
+          if (puzzleVal)
+            continue;
+
+          uint16_t row = p_rows[r << 4], box = p_boxs[b << 4], col = p_cols[c << 4];
+          uint32_t bits = (uint32_t)(row & col & box);
+          uint32_t bitCount = _mm_popcnt_u32(bits);
+          if (!bitCount) {
+            return 0;
+          } else if (bitCount == 1) {
+            p_puzzles[p << 4] = (uint16_t)bits;
+            p_rows[r << 4] = (uint16_t)(row & ~bits);
+            p_boxs[b << 4] = (uint16_t)(box & ~bits);
+            p_cols[c << 4] = (uint16_t)(col & ~bits);
+
+            progress = 1;
+          }
+        }
+      }
+    }
+  } while (progress);
+
+  // check if guess is needed
+  for (p = 0, r = 0; r < 9; r++) {
+    for (b = r2b[r], maxB = b + 3, c = 0; b < maxB; b++) {
+      for (maxC = c + 3; c < maxC; c++, p++) {
+        uint16_t puzzleVal = p_puzzles[p << 4];
+        if (puzzleVal)
+          continue;
+
+        uint16_t row = p_rows[r << 4], box = p_boxs[b << 4], col = p_cols[c << 4];
+        uint32_t bits = (uint32_t)(row & col & box);
+        uint32_t bitCount = _mm_popcnt_u32(bits);
+        if (bitCount == 2) {
+          uint16_t dataCopy[DATA_LENGTH];
+          memcpy(dataCopy, data, DATA_LENGTH * sizeof(uint16_t));
+
+          uint32_t bit2 = _blsr_u32(bits);
+          uint32_t bit1 = bits ^ bit2;
+
+          p_puzzles[p << 4] = (uint16_t)bit1;
+          p_rows[r << 4] = (uint16_t)(row & ~bit1);
+          p_boxs[b << 4] = (uint16_t)(box & ~bit1);
+          p_cols[c << 4] = (uint16_t)(col & ~bit1);
+
+          if (solve_single_puzzle(data, r2b, puzzleOffset))
+            return 1;
+
+          memcpy(data, dataCopy, DATA_LENGTH * sizeof(uint16_t));
+
+          p_puzzles[p << 4] = (uint16_t)bit2;
+          p_rows[r << 4] = (uint16_t)(row & ~bit2);
+          p_boxs[b << 4] = (uint16_t)(box & ~bit2);
+          p_cols[c << 4] = (uint16_t)(col & ~bit2);
+
+          return solve_single_puzzle(data, r2b, puzzleOffset);
+        }
+      }
+    }
+  }
+
+  return 1;
 }
 
 static inline void check_solutions(uint16_t *data, uint16_t *solutions) {
@@ -563,6 +535,34 @@ static void test_setup_step(uint16_t *data) {
     }
   }
 }
+
 #pragma endregion
+
+#pragma region debug
+
+static void print_sudoku(uint16_t *data, int puzzleOffset) {
+  int bit2num[1 << 9];
+  bit2num[0] = 0;
+  int num = 1, bit = 1;
+
+  while (num <= 9) {
+    bit2num[bit] = num;
+    bit <<= 1;
+    ++num;
+  }
+
+  for (int i = 0; i < SUDOKU_CELL_COUNT; i++) {
+    if (i > 0) {
+      if (i % 3 == 0)
+        printf(" ");
+      if (i % 9 == 0)
+        printf("\n");
+      if (i % 27 == 0)
+        printf("\n");
+    }
+    printf("%d", bit2num[data[(i << 4) + puzzleOffset]]);
+  }
+  printf("\n\n\n");
+}
 
 static double time_ms(const clock_t start, const clock_t end) { return ((double)(end - start) * 1000 / CLOCKS_PER_SEC); }
